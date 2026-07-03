@@ -26,7 +26,9 @@
  */
 static crc16_context_t crc_ctx;
 
-stse_ReturnCode_t stse_platform_crc16_init(void) {
+stse_ReturnCode_t stse_platform_crc16_init(void *pArg) {
+    (void)pArg;
+
     crc16_Init();
     return STSE_OK;
 }
