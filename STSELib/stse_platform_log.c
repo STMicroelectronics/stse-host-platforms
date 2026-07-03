@@ -1,6 +1,6 @@
 /******************************************************************************
- * \file	stse_platform_random.c
- * \brief   STSecureElement random number generator platform file
+ * \file	stse_platform_log.c
+ * \brief   STSecureElement printf platform file
  * \author  STMicroelectronics - CS application team
  *
  ******************************************************************************
@@ -15,18 +15,15 @@
  ******************************************************************************
  */
 
-#include "Drivers/rng/rng.h"
+#include <stdio.h>
+#include <stdarg.h>
 #include "stse_conf.h"
 #include "stselib.h"
 
-stse_ReturnCode_t stse_platform_generate_random_init(void *pArg) {
-    (void)pArg;
+void stse_platform_printf(const char *format, ...) {
+    va_list args;
 
-    rng_start();
-
-    return (STSE_OK);
-}
-
-PLAT_UI32 stse_platform_generate_random(void) {
-    return rng_generate_random_number();
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
 }

@@ -1,6 +1,6 @@
 /******************************************************************************
- * \file	stse_platform_st1wire_static.c
- * \brief   STSecureElement Services platform (source)
+ * \file	stse_platform_st1wire.c
+ * \brief   STSecureElement ST1Wire platform (source)
  * \author  STMicroelectronics - CS application team
  *
  ******************************************************************************
@@ -29,9 +29,10 @@ static PLAT_UI8 st1wire_buffer[STSE_PLATFORM_ST1WIRE_BUFFER_LENGTH];
 static PLAT_UI16 st1wire_frame_size;
 static volatile PLAT_UI16 st1wire_frame_offset;
 
-stse_ReturnCode_t stse_platform_st1wire_init(PLAT_UI8 busID) {
+stse_ReturnCode_t stse_platform_st1wire_init(PLAT_UI8 busID, void *pArg) {
     st1wire_ReturnCode_t ret;
     (void)busID;
+    (void)pArg;
 
     ret = st1wire_init();
     if (ret == ST1WIRE_OK) {

@@ -1,6 +1,6 @@
 /******************************************************************************
- * \file	stse_platform_crypto.c
- * \brief   STSecureElement cryptographic platform file
+ * \file	stse_platform_delay.c
+ * \brief   STSecureElement delay platform file
  * \author  STMicroelectronics - CS application team
  *
  ******************************************************************************
@@ -20,7 +20,9 @@
 #include "stse_conf.h"
 #include "stselib.h"
 
-stse_ReturnCode_t stse_platform_delay_init(void) {
+stse_ReturnCode_t stse_platform_delay_init(void *pArg) {
+    (void)pArg;
+
     /* Initialize platform Drivers used by PAL */
     delay_ms_init();
 
