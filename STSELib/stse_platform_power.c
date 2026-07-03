@@ -19,7 +19,9 @@
 #include "stse_conf.h"
 #include "stselib.h"
 
-stse_ReturnCode_t stse_platform_power_init(void) {
+stse_ReturnCode_t stse_platform_power_init(void *pArg) {
+    (void)pArg;
+
     /* -Initialize power line control (PC0  - open-drain) */
     GPIOC->MODER &= ~(GPIO_MODER_MODE0_Msk);
     GPIOC->MODER |= (1 << GPIO_MODER_MODE0_Pos);

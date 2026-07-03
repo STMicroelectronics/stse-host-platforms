@@ -1,6 +1,6 @@
 /******************************************************************************
  * \file	stse_platform_i2c.c
- * \brief   STSecureElement Services platform (source)
+ * \brief   STSecureElement I2C platform (source)
  * \author  STMicroelectronics - CS application team
  *
  ******************************************************************************
@@ -24,16 +24,23 @@
 
 //#define STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
 
+#ifdef STSE_ENABLE_CHUNKS_TRANSFER
+//static PLAT_UI8 I2c_buffer[STSE_CHUNK_SIZE];
+static PLAT_UI8 I2c_buffer[755U]; // Set to A120 max input buffer size + 2 bytes needed for response length + 1 byte for command or response header. Shall be adapted to applicative use case!
+#else
 #ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
 static PLAT_UI8 *pI2c_buffer;
 #else
 static PLAT_UI8 I2c_buffer[755U]; // Set to A120 max input buffer size + 2 bytes needed for response length + 1 byte for command or response header. Shall be adapted to applicative use case!
-#endif
+#endif /* STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION */
+#endif /* STSE_ENABLE_CHUNK_TRANSFER */
+
 static PLAT_UI16 i2c_frame_size;
 static volatile PLAT_UI16 i2c_frame_offset;
 
-stse_ReturnCode_t stse_platform_i2c_init(PLAT_UI8 busID) {
+stse_ReturnCode_t stse_platform_i2c_init(PLAT_UI8 busID, void *pArg) {
     (void)busID;
+    (void)pArg;
     return (stse_ReturnCode_t)i2c_init(I2C1);
 }
 
@@ -57,7 +64,7 @@ stse_ReturnCode_t stse_platform_i2c_send_start(
     (void)devAddr;
     (void)speed;
 
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
     /* - Allocate Communication buffer */
     pI2c_buffer = malloc(FrameLength);
 
@@ -90,13 +97,13 @@ stse_ReturnCode_t stse_platform_i2c_send_continue(
 
     if (data_size != 0) {
         if (pData == NULL) {
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
             memset((pI2c_buffer + i2c_frame_offset), 0x00, data_size);
 #else
             memset((I2c_buffer + i2c_frame_offset), 0x00, data_size);
 #endif
         } else {
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
             memcpy((pI2c_buffer + i2c_frame_offset), pData, data_size);
 #else
             memcpy((I2c_buffer + i2c_frame_offset), pData, data_size);
@@ -125,14 +132,14 @@ stse_ReturnCode_t stse_platform_i2c_send_stop(
 
     /* - Send I2C frame buffer */
     if (ret == STSE_OK) {
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
         ret = (stse_ReturnCode_t)i2c_write(I2C1, devAddr, speed, pI2c_buffer, i2c_frame_size);
 #else
         ret = (stse_ReturnCode_t)i2c_write(I2C1, devAddr, speed, I2c_buffer, i2c_frame_size);
 #endif
     }
 
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
     /* - Free memory allocated to i2c buffer*/
     free(pI2c_buffer);
 #endif
@@ -155,7 +162,7 @@ stse_ReturnCode_t stse_platform_i2c_receive_start(
     /* - Store response Length */
     i2c_frame_size = frameLength;
 
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
     /* - Allocate Communication buffer */
     pI2c_buffer = malloc(frameLength);
 
@@ -166,7 +173,7 @@ stse_ReturnCode_t stse_platform_i2c_receive_start(
 #endif
 
     /* - Read full Frame */
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
     ret = i2c_read(I2C1, devAddr, speed, pI2c_buffer, i2c_frame_size);
 #else
     ret = i2c_read(I2C1, devAddr, speed, I2c_buffer, i2c_frame_size);
@@ -198,7 +205,7 @@ stse_ReturnCode_t stse_platform_i2c_receive_continue(
         }
 
         /* Copy buffer content */
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
         memcpy(pData, (pI2c_buffer + i2c_frame_offset), data_size);
 #else
         memcpy(pData, (I2c_buffer + i2c_frame_offset), data_size);
@@ -223,7 +230,7 @@ stse_ReturnCode_t stse_platform_i2c_receive_stop(
 
     i2c_frame_offset = 0;
 
-#ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
+#if !defined(STSE_ENABLE_CHUNKS_TRANSFER) && defined(STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION)
     /*- Free i2c buffer*/
     free(pI2c_buffer);
 #endif
