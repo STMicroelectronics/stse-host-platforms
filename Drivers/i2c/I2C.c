@@ -32,7 +32,7 @@ uint8_t i2c_init(I2C_TypeDef *pI2C) {
     /* - Configure ANFOFF, DFN & Clock stretching */
     pI2C->CR1 |= (0b1 << I2C_CR1_ANFOFF_Pos) |   // Analog  Noise Filtering disabled
                  (0x0 << I2C_CR1_DNF_Pos) |      // Digital Noise Filtering disabled
-                 (0b1 << I2C_CR1_NOSTRETCH_Pos); // Clock stretching disabled
+                 (0b0 << I2C_CR1_NOSTRETCH_Pos); // Clock stretching enabled
 
     if (i2c_speed == 400) {
         /* - Set I2C1 Timings for 400kHz (Fast mode) */
@@ -81,17 +81,18 @@ int8_t i2c_write(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8
     if (xfer_length > 0xFF) {
         pI2C->CR2 |= I2C_CR2_RELOAD;
     }
+
     /* - Start Xfer */
+    if (pI2C->ISR & I2C_ISR_BUSY) {
+        return -1;
+    }
     pI2C->CR2 |= I2C_CR2_START;
-    while (pI2C->ISR & I2C_ISR_NACKF) {
-        pI2C->CR2 = (0x00 << I2C_CR2_ADD10_Pos) |
-                    (0x00 << I2C_CR2_RD_WRN_Pos) |
-                    (xfer_size << I2C_CR2_NBYTES_Pos) |
-                    (0x01 << I2C_CR2_AUTOEND_Pos) |
-                    (slave_address << (I2C_CR2_SADD_Pos + 1));
-        pI2C->CR2 |= I2C_CR2_START;
-        if (xfer_length > 0xFF) {
-            pI2C->CR2 |= I2C_CR2_RELOAD;
+
+    while (!(pI2C->ISR & I2C_ISR_TXE)) {
+        /*- Check if NACK */
+        if (pI2C->ISR & I2C_ISR_NACKF) {
+            pI2C->ICR |= I2C_ICR_NACKCF;
+            return -1;
         }
     }
 
@@ -99,33 +100,37 @@ int8_t i2c_write(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8
         /* - Send data */
         for (i = 0; i < xfer_size; i++) {
             /* - Wait for previous data to be sent */
-            while ((pI2C->ISR & I2C_ISR_TXE) != 1) {
+            while (!(pI2C->ISR & I2C_ISR_TXE)) {
                 /* - Return error in case of NACK */
                 if (pI2C->ISR & I2C_ISR_NACKF) {
+                    pI2C->ICR |= I2C_ICR_NACKCF;
                     return -1;
                 }
             }
             pI2C->TXDR = (uint8_t)*(pbuffer + (i + offset));
         }
-        xfer_length = (xfer_length - xfer_size);
+
+        xfer_length -= xfer_size;
         if (xfer_length > 0) {
             while (!(pI2C->ISR & I2C_ISR_TCR))
                 ;
+            offset += 0xFF;
+            pI2C->CR2 &= ~(I2C_CR2_NBYTES_Msk);
             if (xfer_length > 0xFF) {
-                offset += 0xFF;
                 xfer_size = 0xFF;
+                pI2C->CR2 |= (xfer_size << I2C_CR2_NBYTES_Pos);
                 pI2C->CR2 |= I2C_CR2_RELOAD;
-                pI2C->CR2 &= ~(I2C_CR2_NBYTES_Msk);
-                pI2C->CR2 |= (xfer_size << I2C_CR2_NBYTES_Pos);
             } else {
-                offset += 0xFF;
                 xfer_size = xfer_length;
-                pI2C->CR2 &= ~(I2C_CR2_NBYTES_Msk);
                 pI2C->CR2 |= (xfer_size << I2C_CR2_NBYTES_Pos);
-                pI2C->CR2 &= ~(I2C_CR2_RELOAD);
+                pI2C->CR2 &= ~I2C_CR2_RELOAD;
             }
         }
     }
+
+    while ((pI2C->ISR & I2C_ISR_STOPF) == 0)
+        ;
+
     return 0;
 }
 
@@ -142,6 +147,7 @@ int8_t i2c_read(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8_
     } else {
         xfer_size = xfer_length;
     }
+
     /* - Xfer Configuration  */
     pI2C->CR2 = (0x00 << I2C_CR2_ADD10_Pos) |
                 (0x01 << I2C_CR2_RD_WRN_Pos) |
@@ -153,12 +159,15 @@ int8_t i2c_read(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8_
     }
 
     /* - Start Xfer */
+    if (pI2C->ISR & I2C_ISR_BUSY) {
+        return -1;
+    }
     pI2C->CR2 |= I2C_CR2_START;
 
     while (!(pI2C->ISR & I2C_ISR_RXNE)) {
         /*- Check if NACK */
-        if ((pI2C->ISR & I2C_ISR_STOPF) && (pI2C->ISR & I2C_ISR_NACKF)) {
-            pI2C->ICR |= I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+        if (pI2C->ISR & I2C_ISR_NACKF) {
+            pI2C->ICR |= I2C_ICR_NACKCF;
             return -1;
         }
     }
@@ -172,23 +181,26 @@ int8_t i2c_read(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8_
             /*- Store data  */
             *(pbuffer++) = (uint8_t)pI2C->RXDR;
         }
-        xfer_length = (xfer_length - xfer_size);
+
+        xfer_length -= xfer_size;
         if (xfer_length > 0) {
             while (!(pI2C->ISR & I2C_ISR_TCR))
                 ;
+            pI2C->CR2 &= ~(I2C_CR2_NBYTES_Msk);
             if (xfer_length > 0xFF) {
                 xfer_size = 0xFF;
-                pI2C->CR2 |= I2C_CR2_RELOAD;
-                pI2C->CR2 &= ~(I2C_CR2_NBYTES_Msk);
                 pI2C->CR2 |= (xfer_size << I2C_CR2_NBYTES_Pos);
+                pI2C->CR2 |= I2C_CR2_RELOAD;
             } else {
                 xfer_size = xfer_length;
-                pI2C->CR2 &= ~(I2C_CR2_NBYTES_Msk);
                 pI2C->CR2 |= (xfer_size << I2C_CR2_NBYTES_Pos);
-                pI2C->CR2 &= ~(I2C_CR2_RELOAD);
+                pI2C->CR2 &= ~I2C_CR2_RELOAD;
             }
         }
     }
+
+    while ((pI2C->ISR & I2C_ISR_STOPF) == 0)
+        ;
 
     return 0;
 }
