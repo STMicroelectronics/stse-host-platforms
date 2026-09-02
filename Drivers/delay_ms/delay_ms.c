@@ -26,7 +26,7 @@ void delay_ms_init(void) {
     TIM6->CR1 |= (TIM_CR1_OPM);
 
     /* - Configure TIM6 prescaler */
-    delay_ms_timer_prescaler = SystemCoreClock / 1000;
+    delay_ms_timer_prescaler = SystemCoreClock / 1000000;
 }
 
 void delay_ms(uint16_t ms) {
@@ -45,7 +45,7 @@ void delay_ms(uint16_t ms) {
     TIM6->CNT = 0x0000;
 
     /* - Set reload value */
-    TIM6->ARR = ms;
+    TIM6->ARR = ms * 1000;
 
     /* - Enable TIM6 */
     TIM6->CR1 |= TIM_CR1_CEN;
