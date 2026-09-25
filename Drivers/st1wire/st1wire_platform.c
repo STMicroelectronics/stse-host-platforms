@@ -4,16 +4,20 @@
  * \author STMicroelectronics SMD Application Team
  *****************************************************************************/
 
+#include "st1wire_platform.h"
 #include "Drivers/delay_ms/delay_ms.h"
 #include "Drivers/delay_us/delay_us.h"
 #include "stm32l4xx.h"
+
+
+extern uint32_t SystemCoreClock;
 
 extern uint32_t SystemCoreClock;
 volatile uint32_t st1wire_ref_cpu_cycles = 0;
 
 /* ---------- Static Platform Abstraction layer Declarations ---------- */
 
-void st1wire_platform_init(void) {
+st1wire_ReturnCode_t st1wire_platform_init(void) {
     /* - Initialize PA9 (ST1Wire line) as open-drain output */
     GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPD9_Msk);
     GPIOA->OTYPER |= 1 << 9;
@@ -26,10 +30,13 @@ void st1wire_platform_init(void) {
 
     delay_us_init();
     delay_ms_init();
+
+    return ST1WIRE_OK;
 }
 
-void st1wire_platform_deinit(void) {
+st1wire_ReturnCode_t st1wire_platform_deinit(void) {
     /* Do Nothing */
+	return ST1WIRE_OK;
 }
 
 void st1wire_platform_io_set(uint8_t bus_addr) {

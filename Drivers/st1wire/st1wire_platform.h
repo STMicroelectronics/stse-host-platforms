@@ -1,22 +1,26 @@
 /**
  ******************************************************************************
- * \brief  ST1Wire Platform Hardware abstraction layer
- * \author STMicroelectronics CS Application Team
- *****************************************************************************/
-
-#include "Drivers/delay_ms/delay_ms.h"
-#include "Drivers/delay_us/delay_us.h"
-#include "stm32l4xx.h"
-
-extern uint32_t SystemCoreClock;
+ * \file    st1wire.h
+ * \brief	st1wie bit banging driver (header)
+ * \author  STMicroelectronics - SMD application team
+ *
+ ******************************************************************************
+ * \attention
+ *
+ * <h2><center>&copy; COPYRIGHT 2022 STMicroelectronics</center></h2>
+ *
+ * This software is licensed under terms that can be found in the LICENSE file in
+ * the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
+#ifndef ST1WIRE_PLATFORM_H_
 
 /* ---------- Static Platform Abstraction layer Declarations ---------- */
 
-/********* Communication protocol debug log ****************/
-//#define ST1WIRE_USE_ST1WIRE_DEBUG_LOG
-#ifdef ST1WIRE_USE_ST1WIRE_DEBUG_LOG
-#define ST1WIRE_ST1WIRE_DEBUG_PRINTF(...) printf(__VA_ARGS__)
-#endif
+#include "st1wire.h"
+#include "stm32l4xx.h"
 
 #ifdef USE_FREERTOS
 #define ST1WIRE_START_CRITICAL_SECTION \
@@ -30,8 +34,8 @@ extern uint32_t SystemCoreClock;
 #define ST1WIRE_END_CRITICAL_SECTION __enable_irq();
 #endif /* USE_FREERTOS */
 
-void st1wire_platform_init(void);
-void st1wire_platform_deinit(void);
+st1wire_ReturnCode_t st1wire_platform_init(void);
+st1wire_ReturnCode_t st1wire_platform_deinit(void);
 void st1wire_platform_io_set(uint8_t bus_addr);
 void st1wire_platform_io_clear(uint8_t bus_addr);
 uint8_t st1wire_platform_io_get(uint8_t bus_addr);
@@ -41,3 +45,5 @@ void st1wire_platform_wake(uint8_t bus_addr);
 void st1wire_platform_delay(uint32_t delay);
 void st1wire_platform_start_timeout(uint32_t timeout);
 int8_t st1wire_platform_is_timeout_exceeded(void);
+
+#endif /*ST1WIRE_PLATFORM_H_*/
