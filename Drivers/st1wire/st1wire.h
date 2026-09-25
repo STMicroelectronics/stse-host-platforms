@@ -18,7 +18,6 @@
 #ifndef ST1WIRE_H_
 #define ST1WIRE_H_
 
-#include "st1wire_platform.h"
 #include "stm32l4xx.h"
 
 /******************************* TIMINGS DEFINITIONS ***************************************/
@@ -27,23 +26,12 @@
 #define ST1WIRE_IDLE 100
 #define ST1WIRE_RECEIVE_TIMEOUT 34464
 
-/* ST1Wire 3-Contact configuration  */
-#define ST1WIRE_3C_LONG_PULSE 5
-#define ST1WIRE_3C_SHORT_PULSE 1
-#define ST1WIRE_3C_ACK_PULSE 1
-#define ST1WIRE_3C_START_PULSE 4 * (ST1WIRE_2C_LONG_PULSE + ST1WIRE_2C_SHORT_PULSE)
-#define ST1WIRE_3C_INTER_BYTE_DELAY 10
-
-/* ST1Wire configuration */
-#define ST1WIRE_2C_LONG_PULSE 14
-#define ST1WIRE_2C_SHORT_PULSE 4
-#define ST1WIRE_2C_WAIT_ACK 4
-#define ST1WIRE_2C_ACK_PULSE 14
-#define ST1WIRE_2C_START_PULSE 4 * (ST1WIRE_2C_LONG_PULSE + ST1WIRE_2C_SHORT_PULSE)
-#define ST1WIRE_2C_INTER_BYTE_DELAY 8 * (ST1WIRE_2C_LONG_PULSE + ST1WIRE_2C_SHORT_PULSE)
-#define ST1WIRE_2C_INTER_FRAME_DELAY 1000
-
-//#define ST1WIRE_NO_LEN_FIX
+/* ST1Wire configuration  */
+#define ST1WIRE_LONG_PULSE 5
+#define ST1WIRE_SHORT_PULSE 2
+#define ST1WIRE_ACK_PULSE 2
+#define ST1WIRE_START_PULSE 10 * (ST1WIRE_LONG_PULSE + ST1WIRE_SHORT_PULSE)
+#define ST1WIRE_INTER_BYTE_DELAY 10
 
 /*********************** Exported functions ***************************************/
 
@@ -63,13 +51,13 @@ typedef enum {
  * \brief	Initialize ST1Wire bus
  * \result  ST1WIRE_OK on success ; st1wire_ReturnCode_t error code otherwise
  */
-extern st1wire_ReturnCode_t st1wire_init(void);
+extern st1wire_ReturnCode_t st1wire_init(uint8_t busID);
 
 /*!
  * \brief	De-initialise ST1Wire bus
  * \result  ST1WIRE_OK on success ; st1wire_ReturnCode_t error code otherwise
  */
-extern st1wire_ReturnCode_t st1wire_deinit(void);
+extern st1wire_ReturnCode_t st1wire_deinit(uint8_t busID);
 
 /*!
  * \brief					Send frame on ST1Wire bus
