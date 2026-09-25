@@ -18,470 +18,393 @@
 
 /* Platform configuration parameters */
 #include "st1wire.h"
+#include "st1wire_platform.h"
+
+/**
+  ******************************************************************************
+  * \file    st1wire.c
+  * \brief st1wie bit banging driver (sources)
+  * \author  STMicroelectronics - CS application team
+  *
+  ******************************************************************************
+  * \attention
+  *
+  * <h2><center>&copy; COPYRIGHT 2022 STMicroelectronics</center></h2>
+  *
+  * This software is licensed under terms that can be found in the LICENSE file in
+  * the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
 
 /* ---------- Static functions Definition ---------- */
-static int8_t _st1wire_SendByte(uint8_t bus_addr,uint8_t speed,uint8_t byte);
-static int8_t _st1wire_ReceiveByte(uint8_t bus_addr,uint8_t speed,uint8_t* rcv_byte);
-static int8_t _st1wire_Idle_detection (uint8_t bus_addr);
-static int8_t _st1wire_SendStart(uint8_t bus_addr,uint8_t speed);
+
+static st1wire_ReturnCode_t st1wire_send_byte(uint8_t bus_addr, uint8_t byte);
+
+static st1wire_ReturnCode_t st1wire_receive_byte(uint8_t bus_addr, uint8_t *rcv_byte);
+
+static st1wire_ReturnCode_t st1wire_send_start(uint8_t bus_addr);
 
 /* ---------- Static functions Declarations ---------- */
-static int8_t _st1wire_Idle_detection (uint8_t bus_addr)
+
+
+/**
+  * @brief Generates the ST1Wire start-of-frame pulse after detecting an idle bus.
+  *
+  * @param bus_addr ST1Wire bus address.
+  * @return ST1WIRE_OK on success, or ST1WIRE_BUS_ARBITRATION_FAULT if the bus does
+  *         not become idle before the timeout.
+  */
+static st1wire_ReturnCode_t st1wire_send_start(uint8_t bus_addr)
 {
-	st1wire_platform_start_timeout(ST1WIRE_IDLE);
-	while(st1wire_platform_io_get(bus_addr))
-	{
-		if (st1wire_platform_is_timeout_exceeded())
-		{
-			return ST1WIRE_BUS_ARBITRATION_FAULT;
-		}
-	}
-	return ST1WIRE_OK;
+  /* Set ST1Wire GPIO in input mode */
+  st1wire_platform_io_in(bus_addr);
+
+  /* Wait for the bus to become idle */
+  st1wire_platform_start_timeout(ST1WIRE_IDLE);
+  while (!st1wire_platform_io_get(bus_addr))
+  {
+    if (st1wire_platform_is_timeout_exceeded())
+    {
+      return ST1WIRE_BUS_ARBITRATION_FAULT;
+    }
+  }
+
+  /* Set ST1Wire GPIO in output mode */
+  st1wire_platform_io_out(bus_addr);
+
+  /* Send Start of Frame pulse */
+  st1wire_platform_io_clear(bus_addr);
+  st1wire_platform_delay(ST1WIRE_START_PULSE);
+  st1wire_platform_io_set(bus_addr);
+
+  return ST1WIRE_OK;
 }
 
-static int8_t _st1wire_SendStart(uint8_t bus_addr, uint8_t speed)
+/**
+  * @brief Receives a byte from the ST1Wire bus.
+  *
+  * @param bus_addr ST1Wire bus address.
+  * @param rcv_byte Pointer to store the received byte.
+  * @return ST1WIRE_OK on success, or ST1WIRE_BUS_RECEIVE_TIMEOUT if a timeout occurs.
+  */
+static st1wire_ReturnCode_t st1wire_receive_byte(uint8_t bus_addr, uint8_t *rcv_byte)
 {
-	uint8_t ret = ST1WIRE_OK;
-	uint16_t start_t = ST1WIRE_3C_START_PULSE;
+  uint32_t i = 0, bit_high, bit_low, byteReceived = 0;
 
-	if (speed == 0)
-	{
-		start_t = ST1WIRE_2C_START_PULSE;
-	}
+  /* Perform inter-byte delay */
+  st1wire_platform_delay(ST1WIRE_INTER_BYTE_DELAY);
 
-	st1wire_platform_io_in(bus_addr);
-	while(!_st1wire_Idle_detection(bus_addr));
-	if(st1wire_platform_io_get(bus_addr) == 0x00)
-	{
-		ret = ST1WIRE_BUS_ARBITRATION_FAULT;
-	}
-	/* - Set bus to low level */
-	st1wire_platform_io_out(bus_addr);
-	st1wire_platform_io_clear(bus_addr);
-	st1wire_platform_delay(start_t);
-	st1wire_platform_io_set(bus_addr);
-	if (speed == 0)
-	{
-		st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-	}
+  /* Start critical section */
+  ST1WIRE_START_CRITICAL_SECTION
 
+  st1wire_platform_io_out(bus_addr);
 
-	return ret;
+  /* Send sync bit('1') */
+  st1wire_platform_io_set(bus_addr);
+  st1wire_platform_delay(ST1WIRE_LONG_PULSE);
+  st1wire_platform_io_clear(bus_addr);
+  st1wire_platform_delay(ST1WIRE_LONG_PULSE);
+  st1wire_platform_io_set(bus_addr);
+
+  /* Set ST1Wire GPIO in input mode */
+  st1wire_platform_io_in(bus_addr);
+
+  /* Handle byte reception */
+  for (i = 0; i < 8; i++)
+  {
+    /* Clear SW counters for bit high and low duration */
+    bit_high = 0;
+    bit_low = 0;
+
+    /* Count bit high level duration */
+    while (st1wire_platform_io_get(bus_addr)) /* while line value is high*/
+    {
+      bit_high++;
+      if (bit_high >= ST1WIRE_RECEIVE_TIMEOUT)
+      {
+        ST1WIRE_END_CRITICAL_SECTION
+        return ST1WIRE_BUS_RECEIVE_TIMEOUT;
+      }
+    }
+
+    /* Count bit low level duration */
+    while (!(st1wire_platform_io_get(bus_addr)))
+    {
+      bit_low++;
+      if (bit_low >= ST1WIRE_RECEIVE_TIMEOUT)
+      {
+        ST1WIRE_END_CRITICAL_SECTION
+        return ST1WIRE_BUS_RECEIVE_TIMEOUT;
+      }
+    }
+
+    /* Store bit value depending on High/low duration */
+    if (bit_high > bit_low)
+    {
+      byteReceived += 1;
+    }
+    byteReceived <<= 1;
+  }
+  /* don't do the last shift */
+  byteReceived >>= 1;
+
+  /* Acknowledge the byte reception */
+  st1wire_platform_io_out(bus_addr);
+  st1wire_platform_io_clear(bus_addr);
+  st1wire_platform_delay(ST1WIRE_ACK_PULSE);
+  st1wire_platform_io_set(bus_addr);
+
+  /* Store the received byte */
+  *rcv_byte = (uint8_t)byteReceived;
+
+  /* Exit critical section */
+  ST1WIRE_END_CRITICAL_SECTION
+
+  /* Return success */
+  return ST1WIRE_OK;
 }
 
-static int8_t _st1wire_ReceiveByte(uint8_t bus_addr, uint8_t speed , uint8_t* rcv_byte)
+/**
+  * @brief Sends a byte over the ST1Wire bus.
+  *
+  * @param bus_addr ST1Wire bus address.
+  * @param byte The byte to send.
+  * @return ST1WIRE_OK on success, or ST1WIRE_BUS_ACK_ERROR if an ACK error occurs.
+  */
+static st1wire_ReturnCode_t st1wire_send_byte(uint8_t bus_addr, uint8_t byte)
 {
-	uint32_t i,DelayHigh,DelayLow,byteReceived = 0;
+  volatile uint32_t i = 0;
 
+  /* Perform inter-byte delay */
+  st1wire_platform_delay(ST1WIRE_INTER_BYTE_DELAY);
 
-	uint16_t long_t = ST1WIRE_3C_LONG_PULSE;
-	uint16_t ack_t = ST1WIRE_3C_ACK_PULSE;
-	uint16_t receive_timout_t = ST1WIRE_RECEIVE_TIMEOUT;
+  /* Enter critical section */
+  ST1WIRE_START_CRITICAL_SECTION
 
-	if (speed == 0)
-	{
-		long_t = ST1WIRE_2C_LONG_PULSE;
-		ack_t = ST1WIRE_2C_ACK_PULSE;
-	}
+  /* Set the STWire GPIO to output mode */
+  st1wire_platform_io_out(bus_addr);
 
-	ST1WIRE_START_CRITICAL_SECTION
-	i = 0;
+  /* Send sync bit('1') */
+  st1wire_platform_io_set(bus_addr);
+  st1wire_platform_delay(ST1WIRE_LONG_PULSE);
+  st1wire_platform_io_clear(bus_addr);
+  st1wire_platform_delay(ST1WIRE_SHORT_PULSE);
 
-	/* - Send sync bit('1') */
-	st1wire_platform_io_out(bus_addr);
-	st1wire_platform_io_set(bus_addr);
-	st1wire_platform_delay(long_t);
-	st1wire_platform_io_clear(bus_addr);
-	st1wire_platform_delay(long_t);
-	st1wire_platform_io_set(bus_addr);
-	// Handle byte reception
-	st1wire_platform_io_in(bus_addr);
-	for(i=0;i<8;i++)
-	{
-		// - Clear SW counters
-		DelayHigh = 0;
-		DelayLow = 0;
-		// - Count High level duration
-		while(st1wire_platform_io_get(bus_addr))  /* while line value is high*/
-		{
-			DelayHigh ++;
-			if (DelayHigh >= receive_timout_t)
-			{
-				ST1WIRE_END_CRITICAL_SECTION
-				return ST1WIRE_BUS_RECEIVE_TIMEOUT;
-			}
-		}
-		// - Count Low level duration
-		while(!(st1wire_platform_io_get(bus_addr))) /* while line value is low */
-		{
-			DelayLow ++;
-			if (DelayLow >= receive_timout_t)
-			{
-				ST1WIRE_END_CRITICAL_SECTION
-				return ST1WIRE_BUS_RECEIVE_TIMEOUT;
-			}
-		}
-		// - Store bit value depending on High/low delays duration
-		if (DelayHigh > DelayLow)
-		{
-			byteReceived += 1;
-		}
-		byteReceived <<= 1 ;
-	}
-	byteReceived >>= 1 ; // don't do the last shift
-	// - Acknowledge the byte reception
-	st1wire_platform_io_out(bus_addr);
-	st1wire_platform_io_clear(bus_addr);
-	st1wire_platform_delay(ack_t);
-	st1wire_platform_io_set(bus_addr);
-	ST1WIRE_END_CRITICAL_SECTION
-	*rcv_byte = (uint8_t)byteReceived;
+  /* Send Byte */
+  for (i = 0; i < 8; i++)
+  {
+    /* Mask each bit value*/
+    if (byte & (1 << (7 - i)))
+    {
+      /* Send '1' symbol */
+      st1wire_platform_io_set(bus_addr);
+      st1wire_platform_delay(ST1WIRE_LONG_PULSE);
+      st1wire_platform_io_clear(bus_addr);
+      st1wire_platform_delay(ST1WIRE_SHORT_PULSE);
+    }
+    else
+    {
+      /* Send '0' symbol */
+      st1wire_platform_io_set(bus_addr);
+      st1wire_platform_delay(ST1WIRE_SHORT_PULSE);
+      st1wire_platform_io_clear(bus_addr);
+      st1wire_platform_delay(ST1WIRE_LONG_PULSE);
+    }
+  }
+  /* Release the STWire line */
+  st1wire_platform_io_set(bus_addr);
 
-	return ST1WIRE_OK;
+  /* Set the STWire GPIO to input mode to read ACK */
+  st1wire_platform_io_in(bus_addr);
+
+  /* Wait for SE ACK (low level on STWire) */
+  i = 0;
+  while (st1wire_platform_io_get(bus_addr))
+  {
+    i++;
+    if (i >= ST1WIRE_RECEIVE_TIMEOUT)
+    {
+      ST1WIRE_END_CRITICAL_SECTION
+      return ST1WIRE_BUS_ACK_ERROR;
+    }
+  }
+
+  /* Wait for SE ACK release */
+  i = 0;
+  while (!(st1wire_platform_io_get(bus_addr)))
+  {
+    i++;
+    if (i >= ST1WIRE_RECEIVE_TIMEOUT)
+    {
+      ST1WIRE_END_CRITICAL_SECTION
+      return ST1WIRE_BUS_ACK_ERROR;
+    }
+  }
+
+  /* exit critical section */
+  ST1WIRE_END_CRITICAL_SECTION
+
+  /* Return success */
+  return ST1WIRE_OK;
 }
 
-static int8_t _st1wire_SendByte(uint8_t bus_addr, uint8_t speed, uint8_t byte)
-{
-	volatile uint32_t i=0;
-	uint16_t long_t = ST1WIRE_3C_LONG_PULSE;
-	uint16_t short_t = ST1WIRE_3C_SHORT_PULSE;
-
-	if (speed == 0)
-	{
-		long_t = ST1WIRE_2C_LONG_PULSE;
-		short_t = ST1WIRE_2C_SHORT_PULSE;
-	}
-
-
-	ST1WIRE_START_CRITICAL_SECTION
-	st1wire_platform_io_out(bus_addr);
-	/* - Send sync bit('1') */
-	st1wire_platform_io_set(bus_addr);
-	st1wire_platform_delay(short_t);
-	st1wire_platform_io_clear(bus_addr);
-	st1wire_platform_delay(long_t);
-	// - Send Byte
-	for(i=0;i<8;i++)
-	{
-		/* Mask each bit value*/
-		if (byte & (1<<(7-i)))
-		{
-			/* - Send '1' */
-			st1wire_platform_io_set(bus_addr);
-			st1wire_platform_delay(long_t);
-			st1wire_platform_io_clear(bus_addr);
-			st1wire_platform_delay(short_t);
-		}
-		else
-		{
-			/* - Send '0' */
-			st1wire_platform_io_set(bus_addr);
-			st1wire_platform_delay(short_t);
-			st1wire_platform_io_clear(bus_addr);
-			st1wire_platform_delay(long_t);
-		}
-	}
-	/* - Release the STWire line*/
-	st1wire_platform_io_set(bus_addr);
-	st1wire_platform_io_in(bus_addr);
-
-	/* - Wait for a low level on STWire*/
-	i = 0;
-	while(st1wire_platform_io_get(bus_addr))
-	{
-		i ++;
-		if (i >= 0xFF)
-		{
-			ST1WIRE_END_CRITICAL_SECTION
-			return ST1WIRE_BUS_ACK_ERROR;
-		}
-	}
-	// - Wait for a high level on STWire
-	i = 0;
-	while(!(st1wire_platform_io_get(bus_addr)))
-	{
-		i ++;
-		if (i >= 0xFF)
-		{
-			ST1WIRE_END_CRITICAL_SECTION
-			return ST1WIRE_BUS_ACK_ERROR;
-		}
-	}
-	ST1WIRE_END_CRITICAL_SECTION
-
-	return ST1WIRE_OK;
-}
 
 /* ---------- Exported functions Declarations ---------- */
 
-st1wire_ReturnCode_t st1wire_init (void)
-{
-	st1wire_platform_init();
-	return ST1WIRE_OK;
-}
-
-st1wire_ReturnCode_t st1wire_deinit (void)
-{
-	st1wire_platform_deinit();
-	return ST1WIRE_OK;
-}
-
 st1wire_ReturnCode_t st1wire_SendFrame(uint8_t bus_addr,
-		uint8_t dev_addr,
-		uint8_t speed,
-		uint8_t* frame,
-		uint16_t frame_length
-)
+                                                uint8_t dev_addr,
+                                                uint8_t speed,
+                                                uint8_t *frame,
+                                                uint16_t frame_length)
 {
-	uint8_t recv_byte;
-	int8_t ret;
-	uint16_t i;
+  st1wire_ReturnCode_t ret;
+  uint8_t recv_byte;
+  uint16_t i = 0;
 
-#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-	ST1WIRE_DEBUG_PRINTF("\n\r; ST1Wire %d >",bus_addr);
-#endif
+  /* Suppress unused parameter warnings */
+  (void)dev_addr;
+  (void)speed;
 
-	/* - Get bus Arbitration and send Start of frame */
-	ret = _st1wire_SendStart(bus_addr,speed);
-	if (ret == ST1WIRE_OK)
-	{
-		if (dev_addr != 0)
-		{
-			/* - Send device Address */
-			ret = _st1wire_SendByte(bus_addr,speed,dev_addr);
-			if (ret != ST1WIRE_OK)
-			{
-				#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-					ST1WIRE_DEBUG_PRINTF(" ADDR ACK ERROR ");
-				#endif
-				return ST1WIRE_BUS_ACK_ERROR;
-			}
-			if (speed == 0)
-			{
-				st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-			} else {
-				st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-			}
-		}
-		/* - Send Frame length */
-#ifndef ST1WIRE_NO_LEN_FIX
-		ret = _st1wire_SendByte(bus_addr,speed,((frame_length >> 8) & 0b111));
-		if (ret == ST1WIRE_OK)
-		{
-			if (speed == 0)
-			{
-				st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-			} else {
-				st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-			}
-#endif
-			ret = _st1wire_SendByte(bus_addr,speed,(frame_length & 0xFF));
-#ifndef ST1WIRE_NO_LEN_FIX
-		}
-#endif
-		if (ret == ST1WIRE_OK)
-		{
-			/* - Send Frame content */
-			for(i=0 ;i < frame_length;i++)
-			{
-				if (speed == 0)
-				{
-					st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-				} else {
-					st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-				}
-				ret = _st1wire_SendByte(bus_addr,speed,frame[i]);
-				if (ret == ST1WIRE_BUS_ACK_ERROR )
-				{
-					#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-						ST1WIRE_DEBUG_PRINTF(" DATA %d ACK ERROR ",i);
-					#endif
-					break;
-				}
-			}
-			/* - Get Frame Ack */
-			if (ret == ST1WIRE_OK)
-			{
-				if (speed == 0)
-				{
-					st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-				} else {
-					st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-				}
-				ret = _st1wire_ReceiveByte(bus_addr,speed,&recv_byte);
-				if ((ret == ST1WIRE_OK) && (recv_byte != 0x20))
-				{
-					#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-						ST1WIRE_DEBUG_PRINTF(" Frame ACK ERROR ");
-					#endif
-					ret = ST1WIRE_BUS_ACK_ERROR;
-				}
-			}
-		}
-	}
+  /* Get bus Arbitration and send Start of frame */
+  ret = st1wire_send_start(bus_addr);
+  if (ret != ST1WIRE_OK)
+  {
+    return ST1WIRE_BUS_ARBITRATION_FAULT;
+  }
 
-#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-	for(i=0;i<frame_length;i++)
-	{
-		ST1WIRE_DEBUG_PRINTF(" %02X",*(frame+i));
-	}
-#endif
+  /* Send Frame length MSB*/
+  ret = st1wire_send_byte(bus_addr, ((frame_length >> 8) & 0b111));
+  if (ret != ST1WIRE_OK)
+  {
+    return ret;
+  }
 
-	// Delay in ST1Wire slow to allow STICK Vcc to stabilize
-	if(speed == 0) {
-		st1wire_platform_delay(ST1WIRE_2C_INTER_FRAME_DELAY);
-	} else {
-		st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-	}
+  /* Send Frame length LSB*/
+  ret = st1wire_send_byte(bus_addr, (frame_length & 0xFF));
+  if (ret != ST1WIRE_OK)
+  {
+    return ret;
+  }
 
-	return (st1wire_ReturnCode_t)ret;
+  /* Send Frame content */
+  for (i = 0; i < frame_length; i++)
+  {
+    ret = st1wire_send_byte(bus_addr, frame[i]);
+    if (ret != ST1WIRE_OK)
+    {
+      return ret;
+    }
+  }
+  /* Get Frame Ack */
+  ret = st1wire_receive_byte(bus_addr, &recv_byte);
+  if ((ret == ST1WIRE_OK) && (recv_byte != 0x20))
+  {
+    ret = ST1WIRE_BUS_ACK_ERROR;
+  }
+  return ret;
 }
 
-st1wire_ReturnCode_t st1wire_ReceiveFrame(uint8_t bus_addr , uint8_t dev_addr, uint8_t speed, uint8_t* frame , uint16_t* pframe_length)
+st1wire_ReturnCode_t st1wire_ReceiveFrame(uint8_t bus_addr,
+                                  uint8_t dev_addr,
+                                  uint8_t speed,
+                                  uint8_t *frame,
+                                  uint16_t *pframe_length)
 {
-	volatile uint8_t ret = ST1WIRE_BUS_ACK_ERROR;
-	volatile uint16_t i;
-	uint8_t rcv_byte;
+  volatile st1wire_ReturnCode_t ret = ST1WIRE_BUS_ACK_ERROR;
+  volatile uint16_t i;
+  uint8_t rcv_byte;
 
-	/* - Get bus Arbitration and send Start of frame */
-	ret = _st1wire_SendStart(bus_addr,speed);
-	/* - Request Frame reception (frame length = 0x00) */
-	if (ret == ST1WIRE_OK)
-	{
+  /* Suppress unused parameter warnings */
+  (void)dev_addr;
+  (void)speed;
 
-		if (dev_addr != 0 )
-		{
-			/* - Send device Address */
-			ret = _st1wire_SendByte(bus_addr,speed,dev_addr);
-			if (ret != ST1WIRE_OK)		// Target STICK Addr)
-			{
-				#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-					ST1WIRE_DEBUG_PRINTF("\n\r; ST1Wire %d < DEV ADDR ACK ERROR",bus_addr);
-				#endif
-				return ST1WIRE_BUS_ACK_ERROR;
-			}
-			if(speed == 0) {
-				st1wire_platform_delay(ST1WIRE_2C_INTER_FRAME_DELAY);
-			} else {
-				st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-			}
-		}
-		ret = _st1wire_SendByte(bus_addr,speed,0x00);
-#ifndef ST1WIRE_NO_LEN_FIX
-		if (ret == ST1WIRE_OK)
-		{
-			if(speed == 0) {
-				st1wire_platform_delay(ST1WIRE_2C_INTER_FRAME_DELAY);
-			} else {
-				st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-			}
-			ret = _st1wire_SendByte(bus_addr,speed,0x00);
-		}
-#endif
-	}
+  /* Get bus Arbitration and send Start of frame */
+  ret = st1wire_send_start(bus_addr);
+  if (ret != ST1WIRE_OK)
+  {
+    return ret;
+  }
 
-	if (ret != ST1WIRE_OK)
-	{
-		#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-			ST1WIRE_DEBUG_PRINTF("\n\r; ST1Wire %d < STATUS FRAME Send ERROR",bus_addr);
-		#endif
-		return (st1wire_ReturnCode_t)ret;
-	}
+  /* Request Frame reception (frame length MSB = 0x00) */
+  ret = st1wire_send_byte(bus_addr, 0x00);
+  if (ret != ST1WIRE_OK)
+  {
+    return ret;
+  }
 
-	/* - Get Request ACK */
-	if (speed == 0)
-	{
-		st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-	} else {
-		st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-	}
-	if (ret == ST1WIRE_OK)
-	{
-		ret = _st1wire_ReceiveByte(bus_addr,speed,&rcv_byte);
-	}
-	if ((ret == ST1WIRE_OK) && (rcv_byte == 0x20))
-	{
-		if (speed == 0)
-		{
-			st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-		} else {
-			st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-		}
-		/* - Get Frame length */
-		ret = _st1wire_ReceiveByte(bus_addr,speed,&rcv_byte);
-#ifndef ST1WIRE_NO_LEN_FIX
-		if (ret == ST1WIRE_OK)
-		{
-			*pframe_length = rcv_byte << 8;
-			if (speed == 0)
-			{
-				st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-			} else {
-				st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-			}
-			ret = _st1wire_ReceiveByte(bus_addr,speed,&rcv_byte);
-		}
-#endif
-		if (ret == ST1WIRE_OK)
-		{
-			*pframe_length += rcv_byte ;
-			for(i=0 ;i< *pframe_length;i++)
-			{
-				if (speed == 0)
-				{
-					st1wire_platform_delay(ST1WIRE_2C_INTER_BYTE_DELAY);
-				} else {
-					st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-				}
-				ret = _st1wire_ReceiveByte(bus_addr,speed,frame+i);
-				if (ret != ST1WIRE_OK)
-				{
-					break;
-				}
-			}
-		}
-	}
-	else 
-	{
-		#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-			ST1WIRE_DEBUG_PRINTF("\n\r; ST1Wire %d < BYTE ACK ERROR",bus_addr);
-		#endif
-		return ST1WIRE_BUS_ACK_ERROR;
-	}
+  /* Request Frame reception (frame length LSB = 0x00) */
+  ret = st1wire_send_byte(bus_addr, 0x00);
+  if (ret != ST1WIRE_OK)
+  {
+    return ret;
+  }
 
-	// Delay in ST1Wire slow to allow STICK Vcc to stabilize
-	if(speed == 0) {
-		st1wire_platform_delay(ST1WIRE_2C_INTER_FRAME_DELAY);
-	} else {
-		st1wire_platform_delay(ST1WIRE_3C_INTER_BYTE_DELAY);
-	}
+  /* Receive Frame Ack */
+  ret = st1wire_receive_byte(bus_addr, &rcv_byte);
+  if ((ret != ST1WIRE_OK) || (rcv_byte != 0x20))
+  {
+    return ST1WIRE_BUS_ACK_ERROR;
+  }
 
-#ifdef ST1WIRE_ENABLE_DEBUG_LOG
-	ST1WIRE_DEBUG_PRINTF("\n\r; ST1Wire %d <",bus_addr);
-	for(i=0;i<*pframe_length;i++)
-	{
-		ST1WIRE_DEBUG_PRINTF(" %02X",*(frame+i));
-	}
-#endif
+  /* Get Frame length  MSB*/
+  ret = st1wire_receive_byte(bus_addr, &rcv_byte);
+  if (ret != ST1WIRE_OK)
+  {
+    return ret;
+  }
+  *pframe_length = rcv_byte << 8;
 
-	return (st1wire_ReturnCode_t)ret;
+  /* Get Frame length  LSB*/
+  ret = st1wire_receive_byte(bus_addr, &rcv_byte);
+  if (ret != ST1WIRE_OK)
+  {
+    return ret;
+  }
+  *pframe_length += rcv_byte;
+
+  /* Receive Frame content */
+  for (i = 0; i < *pframe_length; i++)
+  {
+    ret = st1wire_receive_byte(bus_addr, frame + i);
+    if (ret != ST1WIRE_OK)
+    {
+      return ret;
+    }
+  }
+
+  return ret;
 }
 
-void st1wire_wake (uint8_t bus_addr)
+
+void st1wire_wake(uint8_t busID)
 {
-	st1wire_platform_wake(bus_addr);
+
+  /* Execute st1wire wake call-back (platform abstraction)*/
+  st1wire_platform_wake(busID);
 }
 
-void st1wire_recovery(uint8_t bus_addr,uint8_t speed)
+st1wire_ReturnCode_t st1wire_init(uint8_t busID)
 {
-	if (speed == 0)
-	{
-		st1wire_platform_io_clear(bus_addr);
-		st1wire_platform_delay(100000);
-		st1wire_platform_io_set(bus_addr);
-		st1wire_platform_delay(100000);
-	} else {
-		// Do nothing for speed = 1
-	}
+
+  /* Suppress unused parameter warnings */
+  (void)busID;
+
+  /* Execute st1wire init call-back (platform abstraction)*/
+  return st1wire_platform_init();
 }
+
+st1wire_ReturnCode_t st1wire_deinit(uint8_t busID)
+{
+  /* Suppress unused parameter warnings */
+  (void)busID;
+
+  /* Execute st1wire init call-back (platform abstraction)*/
+  return st1wire_platform_deinit();
+}
+
+
+
+
 

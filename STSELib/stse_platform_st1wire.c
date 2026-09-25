@@ -32,13 +32,12 @@ stse_ReturnCode_t stse_platform_st1wire_init (PLAT_UI8 busID)
 	st1wire_ReturnCode_t ret;
 	(void) busID;
 
-	ret = st1wire_init();
-	if (ret == ST1WIRE_OK )
-	{
-		return STSE_OK;
-	} else {
-		return STSE_PLATFORM_SERVICES_INIT_ERROR;
-	}
+    ret = st1wire_init(busID);
+    if (ret == ST1WIRE_OK) {
+        return STSE_OK;
+    } else {
+        return STSE_PLATFORM_SERVICES_INIT_ERROR;
+    }
 }
 
 stse_ReturnCode_t stse_platform_st1wire_wake (PLAT_UI8 busID,
@@ -48,7 +47,7 @@ stse_ReturnCode_t stse_platform_st1wire_wake (PLAT_UI8 busID,
 	(void) devAddr;
 	(void) speed;
 
-	st1wire_platform_wake(busID);
+    st1wire_wake(busID);
 
 	return (STSE_OK);
 }
