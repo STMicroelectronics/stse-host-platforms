@@ -58,8 +58,6 @@ static st1wire_ReturnCode_t st1wire_send_start(uint8_t bus_addr);
   */
 static st1wire_ReturnCode_t st1wire_send_start(uint8_t bus_addr)
 {
-  st1wire_ReturnCode_t ret = ST1WIRE_OK;
-
   /* Set ST1Wire GPIO in input mode */
   st1wire_platform_io_in(bus_addr);
 
