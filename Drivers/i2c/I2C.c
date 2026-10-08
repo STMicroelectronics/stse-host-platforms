@@ -83,16 +83,9 @@ int8_t i2c_write(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8
     }
     /* - Start Xfer */
     pI2C->CR2 |= I2C_CR2_START;
-    while (pI2C->ISR & I2C_ISR_NACKF) {
-        pI2C->CR2 = (0x00 << I2C_CR2_ADD10_Pos) |
-                    (0x00 << I2C_CR2_RD_WRN_Pos) |
-                    (xfer_size << I2C_CR2_NBYTES_Pos) |
-                    (0x01 << I2C_CR2_AUTOEND_Pos) |
-                    (slave_address << (I2C_CR2_SADD_Pos + 1));
-        pI2C->CR2 |= I2C_CR2_START;
-        if (xfer_length > 0xFF) {
-            pI2C->CR2 |= I2C_CR2_RELOAD;
-        }
+    if (pI2C->ISR & I2C_ISR_NACKF) {
+        pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+        return -1;
     }
 
     while (xfer_length > 0) {
@@ -102,6 +95,7 @@ int8_t i2c_write(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8
             while ((pI2C->ISR & I2C_ISR_TXE) != 1) {
                 /* - Return error in case of NACK */
                 if (pI2C->ISR & I2C_ISR_NACKF) {
+                    pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
                     return -1;
                 }
             }
