@@ -44,10 +44,11 @@ stse_ReturnCode_t stse_platform_st1wire_init(PLAT_UI8 busID) {
 stse_ReturnCode_t stse_platform_st1wire_wake(PLAT_UI8 busID,
                                              PLAT_UI8 devAddr,
                                              PLAT_UI16 speed) {
+    (void)busID;
     (void)devAddr;
     (void)speed;
 
-    st1wire_wake(busID);
+    st1wire_wake();
 
     return (STSE_OK);
 }
@@ -112,9 +113,7 @@ stse_ReturnCode_t stse_platform_st1wire_send_stop(
     /* - Send ST1Wire frame buffer */
     if (ret == STSE_OK) {
         ret = (stse_ReturnCode_t)st1wire_SendFrame(
-            busID,
             devAddr,
-            speed,
             st1wire_buffer,
             st1wire_frame_size);
     }
@@ -132,6 +131,8 @@ stse_ReturnCode_t stse_platform_st1wire_receive_start(
     PLAT_UI16 speed,
     PLAT_UI16 frameLength) {
     PLAT_I8 ret = 0;
+    (void)busID;
+    (void)speed;
 
     /* Check read buffer overflow */
     if (frameLength > STSE_PLATFORM_ST1WIRE_BUFFER_LENGTH) {
@@ -140,12 +141,14 @@ stse_ReturnCode_t stse_platform_st1wire_receive_start(
 
     /* - Read full Frame */
     ret = st1wire_ReceiveFrame(
-        busID,
         devAddr,
-        speed,
         st1wire_buffer,
+        STSE_PLATFORM_ST1WIRE_BUFFER_LENGTH,
         &st1wire_frame_size);
 
+    if (ret == ST1WIRE_FRAME_TOO_LONG) {
+        return STSE_PLATFORM_BUFFER_ERR;
+    }
     if (ret != 0) {
         return STSE_PLATFORM_BUS_ACK_ERROR;
     }

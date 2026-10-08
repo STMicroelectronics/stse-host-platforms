@@ -1,361 +1,185 @@
 /**
  ******************************************************************************
  * \file    st1wire_phy.c
- * \brief   ST1Wire physical layer
+ * \brief   ST1Wire physical layer (3C)
  ******************************************************************************
+ *
+ * A byte is a sync pulse followed by 8 bits, MSB first. Each bit is a high
+ * phase then a low phase: long/short for a 1, short/long for a 0.
+ * The receiver of the byte acknowledges with a short low pulse.
+ *
+ *  ----+      +-----------+   +---+          +- ... -+   +----
+ *      |      |           |   |   |          |       |   |
+ *      +------+           +---+   +----------+       +---+
+ *        sync     bit = 1         bit = 0              ack
+ *
+ * Bytes are not bit-banged: the expected waveform is described as a list of
+ * toggle times and the platform timer plays it while timestamping every edge.
  */
 
 #include "st1wire_phy.h"
-#include "st1wire_timer.h"
-#include "st1wire_dma.h"
 #include "st1wire_platform.h"
 
-static volatile uint16_t
-    capture_buffer[ST1WIRE_PHY_TX_CAPTURE_COUNT];
+/* Timings in microseconds */
+#define ST1WIRE_SHORT_PULSE 7U
+#define ST1WIRE_LONG_PULSE 13U
+#define ST1WIRE_BIT_PERIOD (ST1WIRE_SHORT_PULSE + ST1WIRE_LONG_PULSE)
+#define ST1WIRE_ACK_PULSE 2U
+#define ST1WIRE_START_PULSE 72U
+#define ST1WIRE_IDLE 100U
+#define ST1WIRE_INTER_BYTE_DELAY 10U
+#define ST1WIRE_BYTE_TIMEOUT 2000U
+#define ST1WIRE_WAKE_PULSE 1000U
+#define ST1WIRE_WAKE_DELAY 8000U
 
-static uint16_t
-    tx_dma_buffer[ST1WIRE_PHY_TX_EDGE_COUNT - 1U];
+/* Edges of a byte: 2 for the sync pulse, 2 per bit */
+#define ST1WIRE_BYTE_EDGES 18U
+#define ST1WIRE_ACK_EDGES 2U
 
-static uint16_t
-    rx_output_buffer[3];
+/* When receiving, the host drives the sync pulse and, once the device has
+ * sent its 8 bits, the ack pulse */
+#define ST1WIRE_RX_DATA_END (2U * ST1WIRE_LONG_PULSE + 8U * ST1WIRE_BIT_PERIOD)
+#define ST1WIRE_RX_ACK_START (ST1WIRE_RX_DATA_END + 1U)
+#define ST1WIRE_RX_ACK_END (ST1WIRE_RX_ACK_START + ST1WIRE_ACK_PULSE)
 
+static uint16_t rx_toggles[] = {
+    ST1WIRE_LONG_PULSE,
+    2U * ST1WIRE_LONG_PULSE,
+    ST1WIRE_RX_ACK_START,
+    ST1WIRE_RX_ACK_END,
+};
 
-static uint16_t get_short_time(uint8_t speed)
-{
-    return (speed == 0U)
-        ? ST1WIRE_2C_SHORT_PULSE
-        : ST1WIRE_3C_SHORT_PULSE;
-}
+static uint16_t tx_toggles[ST1WIRE_BYTE_EDGES];
+static volatile uint16_t edges[ST1WIRE_BYTE_EDGES + ST1WIRE_ACK_EDGES];
 
-
-static uint16_t get_long_time(uint8_t speed)
-{
-    return (speed == 0U)
-        ? ST1WIRE_2C_LONG_PULSE
-        : ST1WIRE_3C_LONG_PULSE;
-}
-
-
-static uint16_t get_ack_time(uint8_t speed)
-{
-    return (speed == 0U)
-        ? ST1WIRE_2C_ACK_PULSE
-        : ST1WIRE_3C_ACK_PULSE;
-}
-
-
-static void hw_stop(void)
-{
-    st1wire_timer_stop();
-    st1wire_dma_stop();
-    st1wire_timer_release_pin();
-}
-
-
-static int8_t idle_detection(uint8_t bus_addr)
-{
-    st1wire_platform_start_timeout(
-        ST1WIRE_IDLE);
-
-    while (st1wire_platform_io_get(bus_addr))
-    {
-        if (st1wire_platform_is_timeout_exceeded())
-        {
-            return ST1WIRE_BUS_ARBITRATION_FAULT;
+/* Returns once the line has stayed high for ST1WIRE_IDLE */
+static void wait_bus_idle(void) {
+    for (;;) {
+        st1wire_platform_timeout_start(ST1WIRE_IDLE);
+        while (st1wire_platform_io_get() != 0U) {
+            if (st1wire_platform_timeout_expired() != 0U) {
+                return;
+            }
         }
     }
-
-    return ST1WIRE_OK;
 }
 
-
-static int8_t wait_capture(void)
-{
-    st1wire_platform_start_timeout(
-        ST1WIRE_PHY_TIMEOUT_US);
-
-    while (st1wire_dma_capture_remaining() != 0U)
-    {
-        if (st1wire_platform_is_timeout_exceeded())
-        {
+static st1wire_ReturnCode_t wait_edges(void) {
+    st1wire_platform_timeout_start(ST1WIRE_BYTE_TIMEOUT);
+    while (st1wire_platform_edges_remaining() != 0U) {
+        if (st1wire_platform_timeout_expired() != 0U) {
             return ST1WIRE_BUS_RECEIVE_TIMEOUT;
         }
     }
-
     return ST1WIRE_OK;
 }
 
-
-st1wire_ReturnCode_t st1wire_phy_init(void)
-{
-    st1wire_platform_init();
-    st1wire_timer_init();
-    st1wire_dma_init();
-
-    return ST1WIRE_OK;
-}
-
-
-st1wire_ReturnCode_t st1wire_phy_deinit(void)
-{
-    hw_stop();
-
-    st1wire_timer_deinit();
-    st1wire_dma_deinit();
-    st1wire_platform_deinit();
-
-    return ST1WIRE_OK;
-}
-
-
-st1wire_ReturnCode_t st1wire_phy_send_start(
-    uint8_t bus_addr,
-    uint8_t speed)
-{
-    uint16_t start_time;
-
-    start_time = (speed == 0U)
-        ? ST1WIRE_2C_START_PULSE
-        : ST1WIRE_3C_START_PULSE;
-
-    st1wire_platform_io_in(bus_addr);
-
-    while (!idle_detection(bus_addr))
-    {
+static st1wire_ReturnCode_t wait_waveform_time(uint16_t time) {
+    st1wire_platform_timeout_start(ST1WIRE_BYTE_TIMEOUT);
+    while (st1wire_platform_waveform_time() <= time) {
+        if (st1wire_platform_timeout_expired() != 0U) {
+            return ST1WIRE_BUS_RECEIVE_TIMEOUT;
+        }
     }
+    return ST1WIRE_OK;
+}
 
-    if (st1wire_platform_io_get(bus_addr) == 0U)
-    {
+void st1wire_phy_init(void) {
+    st1wire_platform_init();
+}
+
+void st1wire_phy_deinit(void) {
+    st1wire_platform_deinit();
+}
+
+st1wire_ReturnCode_t st1wire_phy_send_start(void) {
+    st1wire_platform_io_in();
+    wait_bus_idle();
+
+    if (st1wire_platform_io_get() == 0U) {
         return ST1WIRE_BUS_ARBITRATION_FAULT;
     }
 
-    st1wire_platform_io_out(bus_addr);
-    st1wire_platform_io_clear(bus_addr);
-
-    st1wire_platform_delay(start_time);
-
-    st1wire_platform_io_set(bus_addr);
-
-    if (speed == 0U)
-    {
-        st1wire_platform_delay(
-            ST1WIRE_2C_INTER_BYTE_DELAY);
-    }
+    st1wire_platform_io_out();
+    st1wire_platform_io_clear();
+    st1wire_platform_delay_us(ST1WIRE_START_PULSE);
+    st1wire_platform_io_set();
 
     return ST1WIRE_OK;
 }
 
+st1wire_ReturnCode_t st1wire_phy_send_byte(uint8_t byte) {
+    st1wire_ReturnCode_t ret;
+    uint16_t time = 0U;
+    uint16_t high;
+    uint16_t low;
+    uint8_t n = 0U;
+    uint8_t mask;
 
-st1wire_ReturnCode_t st1wire_phy_send_byte(
-    uint8_t bus_addr,
-    uint8_t speed,
-    uint8_t byte)
-{
-    uint16_t edge[ST1WIRE_PHY_TX_EDGE_COUNT];
+    time += ST1WIRE_SHORT_PULSE;
+    tx_toggles[n++] = time;
+    time += ST1WIRE_LONG_PULSE;
+    tx_toggles[n++] = time;
 
-    uint16_t short_t;
-    uint16_t long_t;
-    uint16_t time;
-    uint16_t index;
-    uint16_t i;
-
-    (void)bus_addr;
-
-    short_t = get_short_time(speed);
-    long_t = get_long_time(speed);
-
-    time = 0U;
-    index = 0U;
-
-    /* Sync */
-    time += short_t;
-    edge[index++] = time;
-
-    time += long_t;
-    edge[index++] = time;
-
-    /* Byte, MSB first */
-    for (i = 0U; i < 8U; i++)
-    {
-        if ((byte & (1U << (7U - i))) != 0U)
-        {
-            time += long_t;
-            edge[index++] = time;
-
-            time += short_t;
-            edge[index++] = time;
+    for (mask = 0x80U; mask != 0U; mask >>= 1U) {
+        if ((byte & mask) != 0U) {
+            high = ST1WIRE_LONG_PULSE;
+            low = ST1WIRE_SHORT_PULSE;
+        } else {
+            high = ST1WIRE_SHORT_PULSE;
+            low = ST1WIRE_LONG_PULSE;
         }
-        else
-        {
-            time += short_t;
-            edge[index++] = time;
-
-            time += long_t;
-            edge[index++] = time;
-        }
+        time += high;
+        tx_toggles[n++] = time;
+        time += low;
+        tx_toggles[n++] = time;
     }
 
-    for (i = 1U;
-         i < ST1WIRE_PHY_TX_EDGE_COUNT;
-         i++)
-    {
-        tx_dma_buffer[i - 1U] = edge[i];
-    }
+    /* Also capture the device ack, which follows the last bit */
+    st1wire_platform_waveform_start(tx_toggles, ST1WIRE_BYTE_EDGES,
+                                    edges, ST1WIRE_BYTE_EDGES + ST1WIRE_ACK_EDGES);
+    ret = wait_edges();
+    st1wire_platform_waveform_stop();
 
-    st1wire_timer_prepare();
-
-    st1wire_dma_config_capture(
-        capture_buffer,
-        ST1WIRE_PHY_TX_CAPTURE_COUNT);
-
-    st1wire_dma_config_output(
-        tx_dma_buffer,
-        ST1WIRE_PHY_TX_EDGE_COUNT - 1U);
-
-    st1wire_timer_set_compare(edge[0]);
-    st1wire_timer_enable_dma_requests();
-
-    st1wire_dma_start_capture();
-    st1wire_dma_start_output();
-
-    st1wire_timer_start();
-
-    if (wait_capture() != ST1WIRE_OK)
-    {
-        hw_stop();
-
-        return ST1WIRE_BUS_ACK_ERROR;
-    }
-
-    hw_stop();
-
-    if (capture_buffer[19] <=
-        capture_buffer[18])
-    {
+    if ((ret != ST1WIRE_OK) ||
+        (edges[ST1WIRE_BYTE_EDGES + 1U] <= edges[ST1WIRE_BYTE_EDGES])) {
         return ST1WIRE_BUS_ACK_ERROR;
     }
 
     return ST1WIRE_OK;
 }
 
-
-st1wire_ReturnCode_t st1wire_phy_receive_byte(
-    uint8_t bus_addr,
-    uint8_t speed,
-    uint8_t *byte)
-{
-    uint16_t short_t;
-    uint16_t long_t;
-    uint16_t ack_t;
-    uint16_t period;
-
-    uint16_t sync_fall;
-    uint16_t sync_rise;
-    uint16_t data_end;
-    uint16_t ack_start;
-    uint16_t ack_end;
-
-    uint16_t previous_rising;
-    uint16_t falling;
+st1wire_ReturnCode_t st1wire_phy_receive_byte(uint8_t *byte) {
+    st1wire_ReturnCode_t ret;
     uint16_t rising;
-    uint16_t high_time;
-    uint16_t low_time;
-
-    uint8_t value;
+    uint16_t falling;
+    uint16_t next_rising;
+    uint8_t value = 0U;
     uint8_t i;
 
-    (void)bus_addr;
+    st1wire_platform_waveform_start(rx_toggles, sizeof(rx_toggles) / sizeof(rx_toggles[0]),
+                                    edges, ST1WIRE_BYTE_EDGES);
+    ret = wait_edges();
+    if (ret == ST1WIRE_OK) {
+        ret = wait_waveform_time(ST1WIRE_RX_ACK_END);
+    }
+    st1wire_platform_waveform_stop();
 
-    short_t = get_short_time(speed);
-    long_t = get_long_time(speed);
-    ack_t = get_ack_time(speed);
-
-    period = short_t + long_t;
-
-    sync_fall = long_t;
-    sync_rise = 2U * long_t;
-
-    data_end =
-        sync_rise +
-        (8U * period);
-
-    ack_start =
-        data_end + 1U;
-
-    ack_end =
-        ack_start + ack_t;
-
-    rx_output_buffer[0] = sync_rise;
-    rx_output_buffer[1] = ack_start;
-    rx_output_buffer[2] = ack_end;
-
-    st1wire_timer_prepare();
-
-    st1wire_dma_config_capture(
-        capture_buffer,
-        ST1WIRE_PHY_RX_CAPTURE_COUNT);
-
-    st1wire_dma_config_output(
-        rx_output_buffer,
-        3U);
-
-    st1wire_timer_set_compare(sync_fall);
-    st1wire_timer_enable_dma_requests();
-
-    st1wire_dma_start_capture();
-    st1wire_dma_start_output();
-
-    st1wire_timer_start();
-
-    if (wait_capture() != ST1WIRE_OK)
-    {
-        hw_stop();
-
-        return ST1WIRE_BUS_RECEIVE_TIMEOUT;
+    if (ret != ST1WIRE_OK) {
+        return ret;
     }
 
-    st1wire_platform_start_timeout(
-        ST1WIRE_PHY_TIMEOUT_US);
-
-    while (st1wire_timer_get_counter() <= ack_end)
-    {
-        if (st1wire_platform_is_timeout_exceeded())
-        {
-            hw_stop();
-
-            return ST1WIRE_BUS_RECEIVE_TIMEOUT;
-        }
-    }
-
-    hw_stop();
-
-    value = 0U;
-
-    previous_rising =
-        capture_buffer[1];
-
-    for (i = 0U; i < 8U; i++)
-    {
-        falling =
-            capture_buffer[2U + (2U * i)];
-
-        rising =
-            capture_buffer[3U + (2U * i)];
-
-        high_time =
-            falling - previous_rising;
-
-        low_time =
-            rising - falling;
+    /* edges[0..1] are the sync pulse, then a falling/rising pair per bit */
+    rising = edges[1];
+    for (i = 0U; i < 8U; i++) {
+        falling = edges[2U + 2U * i];
+        next_rising = edges[3U + 2U * i];
 
         value <<= 1U;
-
-        if (high_time > low_time)
-        {
+        if ((uint16_t)(falling - rising) > (uint16_t)(next_rising - falling)) {
             value |= 1U;
         }
-
-        previous_rising = rising;
+        rising = next_rising;
     }
 
     *byte = value;
@@ -363,73 +187,14 @@ st1wire_ReturnCode_t st1wire_phy_receive_byte(
     return ST1WIRE_OK;
 }
 
-
-void st1wire_phy_inter_byte_delay(
-    uint8_t speed)
-{
-    if (speed == 0U)
-    {
-        st1wire_platform_delay(
-            ST1WIRE_2C_INTER_BYTE_DELAY);
-    }
-    else
-    {
-        st1wire_platform_delay(
-            ST1WIRE_3C_INTER_BYTE_DELAY);
-    }
+void st1wire_phy_inter_byte_delay(void) {
+    st1wire_platform_delay_us(ST1WIRE_INTER_BYTE_DELAY);
 }
 
-
-void st1wire_phy_receive_request_delay(
-    uint8_t speed)
-{
-    if (speed == 0U)
-    {
-        st1wire_platform_delay(
-            ST1WIRE_2C_INTER_FRAME_DELAY);
-    }
-    else
-    {
-        st1wire_platform_delay(
-            ST1WIRE_3C_INTER_BYTE_DELAY);
-    }
-}
-
-
-void st1wire_phy_frame_end_delay(
-    uint8_t speed)
-{
-    if (speed == 0U)
-    {
-        st1wire_platform_delay(
-            ST1WIRE_2C_INTER_FRAME_DELAY);
-    }
-    else
-    {
-        st1wire_platform_delay(
-            ST1WIRE_3C_INTER_BYTE_DELAY);
-    }
-}
-
-
-void st1wire_phy_wake(uint8_t bus_addr)
-{
-    st1wire_platform_wake(bus_addr);
-}
-
-
-void st1wire_phy_recovery(
-    uint8_t bus_addr,
-    uint8_t speed)
-{
-    if (speed != 0U)
-    {
-        return;
-    }
-
-    st1wire_platform_io_clear(bus_addr);
-    st1wire_platform_delay(100000U);
-
-    st1wire_platform_io_set(bus_addr);
-    st1wire_platform_delay(100000U);
+void st1wire_phy_wake(void) {
+    st1wire_platform_io_out();
+    st1wire_platform_io_clear();
+    st1wire_platform_delay_us(ST1WIRE_WAKE_PULSE);
+    st1wire_platform_io_set();
+    st1wire_platform_delay_us(ST1WIRE_WAKE_DELAY);
 }

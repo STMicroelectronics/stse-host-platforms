@@ -1,43 +1,39 @@
 /**
  ******************************************************************************
- * \brief  ST1Wire Platform Hardware abstraction layer
- * \author STMicroelectronics CS Application Team
- *****************************************************************************/
+ * \file    st1wire_platform.h
+ * \brief   ST1Wire hardware abstraction for NUCLEO-L452RE (PA9, TIM1, DMA1)
+ ******************************************************************************
+ */
 
-#include "Drivers/delay_ms/delay_ms.h"
-#include "Drivers/delay_us/delay_us.h"
-#include "stm32l4xx.h"
+#ifndef ST1WIRE_PLATFORM_H_
+#define ST1WIRE_PLATFORM_H_
 
-extern uint32_t SystemCoreClock;
-
-/* ---------- Static Platform Abstraction layer Declarations ---------- */
-
-/********* Communication protocol debug log ****************/
-//#define ST1WIRE_USE_ST1WIRE_DEBUG_LOG
-#ifdef ST1WIRE_USE_ST1WIRE_DEBUG_LOG
-#define ST1WIRE_ST1WIRE_DEBUG_PRINTF(...) printf(__VA_ARGS__)
-#endif
-
-#ifdef USE_FREERTOS
-#define ST1WIRE_START_CRITICAL_SECTION \
-    vTaskSuspendAll();                 \
-    __disable_irq();
-#define ST1WIRE_END_CRITICAL_SECTION \
-    xTaskResumeAll();                \
-    __enable_irq();
-#else
-#define ST1WIRE_START_CRITICAL_SECTION __disable_irq();
-#define ST1WIRE_END_CRITICAL_SECTION __enable_irq();
-#endif /* USE_FREERTOS */
+#include <stdint.h>
 
 void st1wire_platform_init(void);
 void st1wire_platform_deinit(void);
-void st1wire_platform_io_set(uint8_t bus_addr);
-void st1wire_platform_io_clear(uint8_t bus_addr);
-uint8_t st1wire_platform_io_get(uint8_t bus_addr);
-void st1wire_platform_io_in(uint8_t bus_addr);
-void st1wire_platform_io_out(uint8_t bus_addr);
-void st1wire_platform_wake(uint8_t bus_addr);
-void st1wire_platform_delay(uint32_t delay);
-void st1wire_platform_start_timeout(uint32_t timeout);
-int8_t st1wire_platform_is_timeout_exceeded(void);
+
+/* Line driven as a GPIO (start condition, wake-up, idle detection) */
+void st1wire_platform_io_in(void);
+void st1wire_platform_io_out(void);
+void st1wire_platform_io_set(void);
+void st1wire_platform_io_clear(void);
+uint8_t st1wire_platform_io_get(void);
+
+/*
+ * Line driven by the timer: the line toggles at each time in toggles[]
+ * (first toggle pulls it low) while the time of every edge seen on the line
+ * is stored in edges[]. Times are in microseconds from the start.
+ */
+void st1wire_platform_waveform_start(const uint16_t *toggles, uint16_t toggle_count,
+                                     volatile uint16_t *edges, uint16_t edge_count);
+void st1wire_platform_waveform_stop(void);
+uint16_t st1wire_platform_edges_remaining(void);
+uint16_t st1wire_platform_waveform_time(void);
+
+/* Microsecond time base */
+void st1wire_platform_delay_us(uint16_t us);
+void st1wire_platform_timeout_start(uint16_t us);
+uint8_t st1wire_platform_timeout_expired(void);
+
+#endif /* ST1WIRE_PLATFORM_H_ */
