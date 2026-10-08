@@ -11,8 +11,6 @@
 
 
 extern uint32_t SystemCoreClock;
-
-extern uint32_t SystemCoreClock;
 volatile uint32_t st1wire_ref_cpu_cycles = 0;
 
 /* ---------- Static Platform Abstraction layer Declarations ---------- */
@@ -30,6 +28,11 @@ st1wire_ReturnCode_t st1wire_platform_init(void) {
 
     delay_us_init();
     delay_ms_init();
+
+    /* Use the Cortex-M cycle counter for timing-sensitive ST1Wire sampling. */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
     return ST1WIRE_OK;
 }
@@ -70,6 +73,14 @@ void st1wire_platform_io_out(uint8_t bus_addr) {
 
 void st1wire_platform_delay(uint32_t delay) {
     delay_us(delay);
+}
+
+uint32_t st1wire_platform_get_cycle_count(void) {
+    return DWT->CYCCNT;
+}
+
+uint32_t st1wire_platform_get_cycles_per_us(void) {
+    return SystemCoreClock / 1000000U;
 }
 
 void st1wire_platform_wake(uint8_t bus_addr) {

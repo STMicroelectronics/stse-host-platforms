@@ -43,6 +43,8 @@ void st1wire_platform_io_in(uint8_t bus_addr);
 void st1wire_platform_io_out(uint8_t bus_addr);
 void st1wire_platform_wake(uint8_t bus_addr);
 void st1wire_platform_delay(uint32_t delay);
+uint32_t st1wire_platform_get_cycle_count(void);
+uint32_t st1wire_platform_get_cycles_per_us(void);
 void st1wire_platform_start_timeout(uint32_t timeout);
 int8_t st1wire_platform_is_timeout_exceeded(void);
 

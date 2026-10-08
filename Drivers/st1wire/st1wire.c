@@ -46,6 +46,11 @@ static st1wire_ReturnCode_t st1wire_receive_byte(uint8_t bus_addr, uint8_t *rcv_
 
 static st1wire_ReturnCode_t st1wire_send_start(uint8_t bus_addr);
 
+static uint32_t st1wire_elapsed_cycles(uint32_t start_cycles)
+{
+  return st1wire_platform_get_cycle_count() - start_cycles;
+}
+
 /* ---------- Static functions Declarations ---------- */
 
 
@@ -91,13 +96,15 @@ static st1wire_ReturnCode_t st1wire_send_start(uint8_t bus_addr)
   */
 static st1wire_ReturnCode_t st1wire_receive_byte(uint8_t bus_addr, uint8_t *rcv_byte)
 {
-  uint32_t i = 0, bit_high, bit_low, byteReceived = 0;
+  uint32_t i = 0, bit_high, bit_low, byteReceived = 0, bit_start;
+  uint32_t timeout_cycles;
 
   /* Perform inter-byte delay */
   st1wire_platform_delay(ST1WIRE_INTER_BYTE_DELAY);
 
   /* Start critical section */
   ST1WIRE_START_CRITICAL_SECTION
+  timeout_cycles = ST1WIRE_RECEIVE_TIMEOUT * st1wire_platform_get_cycles_per_us();
 
   st1wire_platform_io_out(bus_addr);
 
@@ -118,27 +125,31 @@ static st1wire_ReturnCode_t st1wire_receive_byte(uint8_t bus_addr, uint8_t *rcv_
     bit_high = 0;
     bit_low = 0;
 
-    /* Count bit high level duration */
+    /* Measure bit high duration in real time (independent of compiler optimization). */
+    bit_start = st1wire_platform_get_cycle_count();
     while (st1wire_platform_io_get(bus_addr)) /* while line value is high*/
     {
-      bit_high++;
-      if (bit_high >= ST1WIRE_RECEIVE_TIMEOUT)
+      bit_high = st1wire_elapsed_cycles(bit_start);
+      if (bit_high >= timeout_cycles)
       {
         ST1WIRE_END_CRITICAL_SECTION
         return ST1WIRE_BUS_RECEIVE_TIMEOUT;
       }
     }
+    bit_high = st1wire_elapsed_cycles(bit_start);
 
-    /* Count bit low level duration */
+    /* Measure bit low duration. */
+    bit_start = st1wire_platform_get_cycle_count();
     while (!(st1wire_platform_io_get(bus_addr)))
     {
-      bit_low++;
-      if (bit_low >= ST1WIRE_RECEIVE_TIMEOUT)
+      bit_low = st1wire_elapsed_cycles(bit_start);
+      if (bit_low >= timeout_cycles)
       {
         ST1WIRE_END_CRITICAL_SECTION
         return ST1WIRE_BUS_RECEIVE_TIMEOUT;
       }
     }
+    bit_low = st1wire_elapsed_cycles(bit_start);
 
     /* Store bit value depending on High/low duration */
     if (bit_high > bit_low)
@@ -175,7 +186,7 @@ static st1wire_ReturnCode_t st1wire_receive_byte(uint8_t bus_addr, uint8_t *rcv_
   */
 static st1wire_ReturnCode_t st1wire_send_byte(uint8_t bus_addr, uint8_t byte)
 {
-  volatile uint32_t i = 0;
+  uint32_t i, timeout_start, timeout_cycles;
 
   /* Perform inter-byte delay */
   st1wire_platform_delay(ST1WIRE_INTER_BYTE_DELAY);
@@ -188,9 +199,9 @@ static st1wire_ReturnCode_t st1wire_send_byte(uint8_t bus_addr, uint8_t byte)
 
   /* Send sync bit('1') */
   st1wire_platform_io_set(bus_addr);
-  st1wire_platform_delay(ST1WIRE_LONG_PULSE);
-  st1wire_platform_io_clear(bus_addr);
   st1wire_platform_delay(ST1WIRE_SHORT_PULSE);
+  st1wire_platform_io_clear(bus_addr);
+  st1wire_platform_delay(ST1WIRE_LONG_PULSE);
 
   /* Send Byte */
   for (i = 0; i < 8; i++)
@@ -218,13 +229,13 @@ static st1wire_ReturnCode_t st1wire_send_byte(uint8_t bus_addr, uint8_t byte)
 
   /* Set the STWire GPIO to input mode to read ACK */
   st1wire_platform_io_in(bus_addr);
+  timeout_cycles = ST1WIRE_RECEIVE_TIMEOUT * st1wire_platform_get_cycles_per_us();
 
   /* Wait for SE ACK (low level on STWire) */
-  i = 0;
+  timeout_start = st1wire_platform_get_cycle_count();
   while (st1wire_platform_io_get(bus_addr))
   {
-    i++;
-    if (i >= ST1WIRE_RECEIVE_TIMEOUT)
+    if (st1wire_elapsed_cycles(timeout_start) >= timeout_cycles)
     {
       ST1WIRE_END_CRITICAL_SECTION
       return ST1WIRE_BUS_ACK_ERROR;
@@ -232,11 +243,10 @@ static st1wire_ReturnCode_t st1wire_send_byte(uint8_t bus_addr, uint8_t byte)
   }
 
   /* Wait for SE ACK release */
-  i = 0;
+  timeout_start = st1wire_platform_get_cycle_count();
   while (!(st1wire_platform_io_get(bus_addr)))
   {
-    i++;
-    if (i >= ST1WIRE_RECEIVE_TIMEOUT)
+    if (st1wire_elapsed_cycles(timeout_start) >= timeout_cycles)
     {
       ST1WIRE_END_CRITICAL_SECTION
       return ST1WIRE_BUS_ACK_ERROR;
