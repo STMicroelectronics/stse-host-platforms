@@ -28,10 +28,9 @@
 
 /* ST1Wire configuration  */
 #define ST1WIRE_LONG_PULSE 5
-#define ST1WIRE_SHORT_PULSE 2
-#define ST1WIRE_ACK_PULSE 2
-#define ST1WIRE_START_PULSE 10 * (ST1WIRE_LONG_PULSE + ST1WIRE_SHORT_PULSE)
-#define ST1WIRE_INTER_BYTE_DELAY 10
+#define ST1WIRE_SHORT_PULSE 1
+#define ST1WIRE_START_PULSE 37
+#define ST1WIRE_INTER_BYTE_DELAY 4
 
 /*********************** Exported functions ***************************************/
 

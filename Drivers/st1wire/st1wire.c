@@ -101,12 +101,11 @@ static st1wire_ReturnCode_t st1wire_receive_byte(uint8_t bus_addr, uint8_t *rcv_
 
   st1wire_platform_io_out(bus_addr);
 
-  /* Send sync bit('1') */
+  /* Send sync bit('0') */
   st1wire_platform_io_set(bus_addr);
-  st1wire_platform_delay(ST1WIRE_LONG_PULSE);
+  st1wire_platform_delay(ST1WIRE_SHORT_PULSE);
   st1wire_platform_io_clear(bus_addr);
   st1wire_platform_delay(ST1WIRE_LONG_PULSE);
-  st1wire_platform_io_set(bus_addr);
 
   /* Set ST1Wire GPIO in input mode */
   st1wire_platform_io_in(bus_addr);
@@ -153,7 +152,7 @@ static st1wire_ReturnCode_t st1wire_receive_byte(uint8_t bus_addr, uint8_t *rcv_
   /* Acknowledge the byte reception */
   st1wire_platform_io_out(bus_addr);
   st1wire_platform_io_clear(bus_addr);
-  st1wire_platform_delay(ST1WIRE_ACK_PULSE);
+  st1wire_platform_delay(ST1WIRE_SHORT_PULSE);
   st1wire_platform_io_set(bus_addr);
 
   /* Store the received byte */
@@ -186,11 +185,11 @@ static st1wire_ReturnCode_t st1wire_send_byte(uint8_t bus_addr, uint8_t byte)
   /* Set the STWire GPIO to output mode */
   st1wire_platform_io_out(bus_addr);
 
-  /* Send sync bit('1') */
+  /* Send sync bit('0') */
   st1wire_platform_io_set(bus_addr);
-  st1wire_platform_delay(ST1WIRE_LONG_PULSE);
-  st1wire_platform_io_clear(bus_addr);
   st1wire_platform_delay(ST1WIRE_SHORT_PULSE);
+  st1wire_platform_io_clear(bus_addr);
+  st1wire_platform_delay(ST1WIRE_LONG_PULSE);
 
   /* Send Byte */
   for (i = 0; i < 8; i++)
@@ -259,7 +258,7 @@ st1wire_ReturnCode_t st1wire_SendFrame(uint8_t bus_addr,
                                                 uint8_t *frame,
                                                 uint16_t frame_length)
 {
-  st1wire_ReturnCode_t ret;
+  st1wire_ReturnCode_t ret = ST1WIRE_BUS_ARBITRATION_FAULT;
   uint8_t recv_byte;
   uint16_t i = 0;
 
