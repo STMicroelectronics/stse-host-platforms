@@ -50,8 +50,7 @@ void delay_us(uint16_t us) {
     TIM6->CR1 |= TIM_CR1_CEN;
 
     /* - Wait until TIM6 Update interrupt flag*/
-    while (!(TIM6->SR & TIM_SR_UIF))
-        ;
+    while (!(TIM6->SR & TIM_SR_UIF));
 
     /* - Disable TIM6 */
     TIM6->CR1 &= ~(TIM_CR1_CEN);
