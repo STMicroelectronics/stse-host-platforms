@@ -377,27 +377,27 @@ st1wire_ReturnCode_t st1wire_ReceiveFrame(uint8_t bus_addr,
 }
 
 
-void st1wire_wake(uint8_t busID)
+void st1wire_wake(uint8_t bus_id)
 {
 
   /* Execute st1wire wake call-back (platform abstraction)*/
-  st1wire_platform_wake(busID);
+  st1wire_platform_wake(bus_id);
 }
 
-st1wire_ReturnCode_t st1wire_init(uint8_t busID)
+st1wire_ReturnCode_t st1wire_init(uint8_t bus_id)
 {
 
   /* Suppress unused parameter warnings */
-  (void)busID;
+  (void)bus_id;
 
   /* Execute st1wire init call-back (platform abstraction)*/
   return st1wire_platform_init();
 }
 
-st1wire_ReturnCode_t st1wire_deinit(uint8_t busID)
+st1wire_ReturnCode_t st1wire_deinit(uint8_t bus_id)
 {
   /* Suppress unused parameter warnings */
-  (void)busID;
+  (void)bus_id;
 
   /* Execute st1wire init call-back (platform abstraction)*/
   return st1wire_platform_deinit();

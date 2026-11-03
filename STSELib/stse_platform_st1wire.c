@@ -29,12 +29,12 @@ static PLAT_UI8 st1wire_buffer[STSE_PLATFORM_ST1WIRE_BUFFER_LENGTH];
 static PLAT_UI16 st1wire_frame_size;
 static volatile PLAT_UI16 st1wire_frame_offset;
 
-stse_ReturnCode_t stse_platform_st1wire_init(PLAT_UI8 busID, void *pArg) {
+stse_return_code_t stse_platform_st1wire_init(PLAT_UI8 bus_id, void *pArg) {
     st1wire_ReturnCode_t ret;
-    (void)busID;
+    (void)bus_id;
     (void)pArg;
 
-    ret = st1wire_init(busID);
+    ret = st1wire_init(bus_id);
     if (ret == ST1WIRE_OK) {
         return STSE_OK;
     } else {
@@ -42,52 +42,52 @@ stse_ReturnCode_t stse_platform_st1wire_init(PLAT_UI8 busID, void *pArg) {
     }
 }
 
-stse_ReturnCode_t stse_platform_st1wire_wake(PLAT_UI8 busID,
-                                             PLAT_UI8 devAddr,
+stse_return_code_t stse_platform_st1wire_wake(PLAT_UI8 bus_id,
+                                             PLAT_UI8 dev_addr,
                                              PLAT_UI16 speed) {
-    (void)devAddr;
+    (void)dev_addr;
     (void)speed;
 
-    st1wire_wake(busID);
+    st1wire_wake(bus_id);
 
     return (STSE_OK);
 }
 
-stse_ReturnCode_t stse_platform_st1wire_send_start(
-    PLAT_UI8 busID,
-    PLAT_UI8 devAddr,
+stse_return_code_t stse_platform_st1wire_send_start(
+    PLAT_UI8 bus_id,
+    PLAT_UI8 dev_addr,
     PLAT_UI16 speed,
-    PLAT_UI16 FrameLength) {
-    (void)busID;
-    (void)devAddr;
+    PLAT_UI16 frame_length) {
+    (void)bus_id;
+    (void)dev_addr;
     (void)speed;
 
     /* - Check buffer overflow */
-    if (FrameLength > sizeof(st1wire_buffer) / sizeof(st1wire_buffer[0])) {
+    if (frame_length > sizeof(st1wire_buffer) / sizeof(st1wire_buffer[0])) {
         return STSE_PLATFORM_BUFFER_ERR;
     }
 
-    st1wire_frame_size = FrameLength;
+    st1wire_frame_size = frame_length;
     st1wire_frame_offset = 0;
 
     return STSE_OK;
 }
 
-stse_ReturnCode_t stse_platform_st1wire_send_continue(
-    PLAT_UI8 busID,
-    PLAT_UI8 devAddr,
+stse_return_code_t stse_platform_st1wire_send_continue(
+    PLAT_UI8 bus_id,
+    PLAT_UI8 dev_addr,
     PLAT_UI16 speed,
-    PLAT_UI8 *pData,
+    PLAT_UI8 *p_data,
     PLAT_UI16 data_size) {
-    (void)busID;
-    (void)devAddr;
+    (void)bus_id;
+    (void)dev_addr;
     (void)speed;
 
     if (data_size != 0) {
-        if (pData == NULL) {
+        if (p_data == NULL) {
             memset((st1wire_buffer + st1wire_frame_offset), 0x00, data_size);
         } else {
-            memcpy((st1wire_buffer + st1wire_frame_offset), pData, data_size);
+            memcpy((st1wire_buffer + st1wire_frame_offset), p_data, data_size);
         }
         st1wire_frame_offset += data_size;
     }
@@ -95,26 +95,26 @@ stse_ReturnCode_t stse_platform_st1wire_send_continue(
     return STSE_OK;
 }
 
-stse_ReturnCode_t stse_platform_st1wire_send_stop(
-    PLAT_UI8 busID,
-    PLAT_UI8 devAddr,
+stse_return_code_t stse_platform_st1wire_send_stop(
+    PLAT_UI8 bus_id,
+    PLAT_UI8 dev_addr,
     PLAT_UI16 speed,
-    PLAT_UI8 *pData,
+    PLAT_UI8 *p_data,
     PLAT_UI16 data_size) {
-    stse_ReturnCode_t ret;
+    stse_return_code_t ret;
 
     ret = stse_platform_st1wire_send_continue(
-        busID,
-        devAddr,
+        bus_id,
+        dev_addr,
         speed,
-        pData,
+        p_data,
         data_size);
 
     /* - Send ST1Wire frame buffer */
     if (ret == STSE_OK) {
-        ret = (stse_ReturnCode_t)st1wire_SendFrame(
-            busID,
-            devAddr,
+        ret = (stse_return_code_t)st1wire_SendFrame(
+            bus_id,
+            dev_addr,
             speed,
             st1wire_buffer,
             st1wire_frame_size);
@@ -127,22 +127,22 @@ stse_ReturnCode_t stse_platform_st1wire_send_stop(
     return ret;
 }
 
-stse_ReturnCode_t stse_platform_st1wire_receive_start(
-    PLAT_UI8 busID,
-    PLAT_UI8 devAddr,
+stse_return_code_t stse_platform_st1wire_receive_start(
+    PLAT_UI8 bus_id,
+    PLAT_UI8 dev_addr,
     PLAT_UI16 speed,
-    PLAT_UI16 frameLength) {
+    PLAT_UI16 frame_length) {
     PLAT_I8 ret = 0;
 
     /* Check read buffer overflow */
-    if (frameLength > STSE_PLATFORM_ST1WIRE_BUFFER_LENGTH) {
+    if (frame_length > STSE_PLATFORM_ST1WIRE_BUFFER_LENGTH) {
         return STSE_PLATFORM_BUFFER_ERR;
     }
 
     /* - Read full Frame */
     ret = st1wire_ReceiveFrame(
-        busID,
-        devAddr,
+        bus_id,
+        dev_addr,
         speed,
         st1wire_buffer,
         &st1wire_frame_size);
@@ -157,17 +157,17 @@ stse_ReturnCode_t stse_platform_st1wire_receive_start(
     return STSE_OK;
 }
 
-stse_ReturnCode_t stse_platform_st1wire_receive_continue(
-    PLAT_UI8 busID,
-    PLAT_UI8 devAddr,
+stse_return_code_t stse_platform_st1wire_receive_continue(
+    PLAT_UI8 bus_id,
+    PLAT_UI8 dev_addr,
     PLAT_UI16 speed,
-    PLAT_UI8 *pData,
+    PLAT_UI8 *p_data,
     PLAT_UI16 data_size) {
-    (void)busID;
-    (void)devAddr;
+    (void)bus_id;
+    (void)dev_addr;
     (void)speed;
 
-    if (pData != NULL) {
+    if (p_data != NULL) {
 
         /* Check read overflow */
         if ((st1wire_frame_size - st1wire_frame_offset) < data_size) {
@@ -175,7 +175,7 @@ stse_ReturnCode_t stse_platform_st1wire_receive_continue(
         }
 
         /* Copy buffer content */
-        memcpy(pData, (st1wire_buffer + st1wire_frame_offset), data_size);
+        memcpy(p_data, (st1wire_buffer + st1wire_frame_offset), data_size);
     }
 
     st1wire_frame_offset += data_size;
@@ -183,14 +183,14 @@ stse_ReturnCode_t stse_platform_st1wire_receive_continue(
     return STSE_OK;
 }
 
-stse_ReturnCode_t stse_platform_st1wire_receive_stop(
-    PLAT_UI8 busID,
-    PLAT_UI8 devAddr,
+stse_return_code_t stse_platform_st1wire_receive_stop(
+    PLAT_UI8 bus_id,
+    PLAT_UI8 dev_addr,
     PLAT_UI16 speed,
-    PLAT_UI8 *pData,
+    PLAT_UI8 *p_data,
     PLAT_UI16 data_size) {
     /*- Copy last element*/
-    stse_platform_st1wire_receive_continue(busID, devAddr, speed, pData, data_size);
+    stse_platform_st1wire_receive_continue(bus_id, dev_addr, speed, p_data, data_size);
 
     st1wire_frame_offset = 0;
 
