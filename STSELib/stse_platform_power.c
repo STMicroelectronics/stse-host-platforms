@@ -19,7 +19,7 @@
 #include "stse_conf.h"
 #include "stselib.h"
 
-stse_ReturnCode_t stse_platform_power_init(void *pArg) {
+stse_return_code_t stse_platform_power_init(void *pArg) {
     (void)pArg;
 
     /* -Initialize power line control (PC0  - open-drain) */
@@ -40,9 +40,9 @@ stse_ReturnCode_t stse_platform_power_init(void *pArg) {
     return STSE_OK;
 }
 
-stse_ReturnCode_t stse_platform_power_on(PLAT_UI8 bus, PLAT_UI8 devAddr) {
+stse_return_code_t stse_platform_power_on(PLAT_UI8 bus, PLAT_UI8 dev_addr) {
     (void)bus;
-    (void)devAddr;
+    (void)dev_addr;
 
     /* - Power on all the STSAFE SLOTS */
     GPIOB->ODR &= ~(1 << GPIO_ODR_OD0_Pos);
@@ -52,9 +52,9 @@ stse_ReturnCode_t stse_platform_power_on(PLAT_UI8 bus, PLAT_UI8 devAddr) {
     return (STSE_OK);
 }
 
-stse_ReturnCode_t stse_platform_power_off(PLAT_UI8 bus, PLAT_UI8 devAddr) {
+stse_return_code_t stse_platform_power_off(PLAT_UI8 bus, PLAT_UI8 dev_addr) {
     (void)bus;
-    (void)devAddr;
+    (void)dev_addr;
 
     /* - Power-off all the STSAFE SLOTS */
     GPIOB->ODR |= (1 << GPIO_ODR_OD0_Pos);

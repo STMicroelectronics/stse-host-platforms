@@ -26,18 +26,18 @@
  */
 static crc16_context_t crc_ctx;
 
-stse_ReturnCode_t stse_platform_crc16_init(void *pArg) {
-    (void)pArg;
+stse_return_code_t stse_platform_crc16_init(void *p_arg) {
+    (void)p_arg;
 
     crc16_Init();
     return STSE_OK;
 }
 
-PLAT_UI16 stse_platform_Crc16_Calculate(PLAT_UI8 *pbuffer, PLAT_UI16 length) {
+PLAT_UI16 stse_platform_crc16_calculate(PLAT_UI8 *p_buffer, PLAT_UI16 length) {
     crc16_InitContext(&crc_ctx);
-    return crc16_Calculate(pbuffer, length, &crc_ctx);
+    return crc16_Calculate(p_buffer, length, &crc_ctx);
 }
 
-PLAT_UI16 stse_platform_Crc16_Accumulate(PLAT_UI8 *pbuffer, PLAT_UI16 length) {
-    return crc16_Accumulate(pbuffer, length, &crc_ctx);
+PLAT_UI16 stse_platform_crc16_accumulate(PLAT_UI8 *p_buffer, PLAT_UI16 length) {
+    return crc16_Accumulate(p_buffer, length, &crc_ctx);
 }

@@ -19,8 +19,8 @@
 #include "stse_conf.h"
 #include "stselib.h"
 
-stse_ReturnCode_t stse_platform_generate_random_init(void *pArg) {
-    (void)pArg;
+stse_return_code_t stse_platform_generate_random_init(void *p_arg) {
+    (void)p_arg;
 
     rng_start();
 

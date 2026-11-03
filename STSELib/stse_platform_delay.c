@@ -20,8 +20,8 @@
 #include "stse_conf.h"
 #include "stselib.h"
 
-stse_ReturnCode_t stse_platform_delay_init(void *pArg) {
-    (void)pArg;
+stse_return_code_t stse_platform_delay_init(void *p_arg) {
+    (void)p_arg;
 
     /* Initialize platform Drivers used by PAL */
     delay_ms_init();
@@ -29,6 +29,6 @@ stse_ReturnCode_t stse_platform_delay_init(void *pArg) {
     return STSE_OK;
 }
 
-void stse_platform_Delay_ms(PLAT_UI16 delay_val) {
+void stse_platform_delay_ms(PLAT_UI16 delay_val) {
     delay_ms(delay_val);
 }

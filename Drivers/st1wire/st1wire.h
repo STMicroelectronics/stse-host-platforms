@@ -50,13 +50,13 @@ typedef enum {
  * \brief	Initialize ST1Wire bus
  * \result  ST1WIRE_OK on success ; st1wire_ReturnCode_t error code otherwise
  */
-extern st1wire_ReturnCode_t st1wire_init(uint8_t busID);
+extern st1wire_ReturnCode_t st1wire_init(uint8_t bus_id);
 
 /*!
  * \brief	De-initialise ST1Wire bus
  * \result  ST1WIRE_OK on success ; st1wire_ReturnCode_t error code otherwise
  */
-extern st1wire_ReturnCode_t st1wire_deinit(uint8_t busID);
+extern st1wire_ReturnCode_t st1wire_deinit(uint8_t bus_id);
 
 /*!
  * \brief					Send frame on ST1Wire bus
