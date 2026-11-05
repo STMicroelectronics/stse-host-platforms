@@ -25,4 +25,13 @@ int8_t i2c_write(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8
 int8_t i2c_read(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8_t *pbuffer, uint16_t size);
 void i2c_wake(I2C_TypeDef *pI2C, uint8_t slave_address);
 
+/* Zero-Copy Scatter-Gather Streaming API */
+int8_t i2c_write_start(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint16_t total_length);
+int8_t i2c_write_continue(I2C_TypeDef *pI2C, const uint8_t *pdata, uint16_t length);
+int8_t i2c_write_stop(I2C_TypeDef *pI2C, const uint8_t *pdata, uint16_t length);
+
+int8_t i2c_read_start(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint16_t total_length);
+int8_t i2c_read_continue(I2C_TypeDef *pI2C, uint8_t *pdata, uint16_t length);
+int8_t i2c_read_stop(I2C_TypeDef *pI2C, uint8_t *pdata, uint16_t length);
+
 #endif /* DRIVERS_I2C_I2C_H_ */

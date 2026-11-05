@@ -15,6 +15,7 @@
  ******************************************************************************
  */
 
+#include <stddef.h>
 #include "Drivers/i2c/i2c.h"
 #include "Drivers/delay_ms/delay_ms.h"
 
@@ -83,14 +84,13 @@ int8_t i2c_write(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8
     }
 
     /* - Start Xfer */
-    if (pI2C->ISR & I2C_ISR_BUSY) {
-        return -1;
+    while (pI2C->ISR & I2C_ISR_BUSY) {
+        /* Clear any stray STOPF or NACKF from wake pulse */
+        if (pI2C->ISR & (I2C_ISR_STOPF | I2C_ISR_NACKF)) {
+            pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+        }
     }
     pI2C->CR2 |= I2C_CR2_START;
-    if (pI2C->ISR & I2C_ISR_NACKF) {
-        pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
-        return -1;
-    }
 
     while (xfer_length > 0) {
         /* - Send data */
@@ -211,4 +211,212 @@ void i2c_wake(I2C_TypeDef *pI2C, uint8_t slave_address) {
                 (slave_address << (I2C_CR2_SADD_Pos + 1));
     /* - Start Xfer */
     pI2C->CR2 |= I2C_CR2_START;
+
+    /* Wait for autoend stop flag or NACK to settle the wake pulse */
+    while ((pI2C->ISR & (I2C_ISR_STOPF | I2C_ISR_NACKF)) == 0)
+        ;
+    pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+}
+
+/* Zero-Copy Scatter-Gather Streaming Implementation ------------------------*/
+
+static uint16_t i2c_tx_remaining = 0;
+static uint8_t  i2c_tx_chunk_size = 0;
+static uint16_t i2c_rx_remaining = 0;
+static uint8_t  i2c_rx_chunk_size = 0;
+
+int8_t i2c_write_start(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint16_t total_length) {
+    i2c_speed = speed;
+    i2c_init(pI2C);
+
+    i2c_tx_remaining = total_length;
+    if (i2c_tx_remaining > 0xFF) {
+        i2c_tx_chunk_size = 0xFF;
+    } else {
+        i2c_tx_chunk_size = (uint8_t)i2c_tx_remaining;
+    }
+
+    /* - Xfer Configuration */
+    pI2C->CR2 = (0x00 << I2C_CR2_ADD10_Pos) |
+                (0x00 << I2C_CR2_RD_WRN_Pos) |
+                (i2c_tx_chunk_size << I2C_CR2_NBYTES_Pos) |
+                (0x01 << I2C_CR2_AUTOEND_Pos) |
+                (slave_address << (I2C_CR2_SADD_Pos + 1));
+    if (i2c_tx_remaining > 0xFF) {
+        pI2C->CR2 |= I2C_CR2_RELOAD;
+    }
+
+    /* - Start Xfer */
+    while (pI2C->ISR & I2C_ISR_BUSY) {
+        /* Clear any stray STOPF or NACKF from wake pulse */
+        if (pI2C->ISR & (I2C_ISR_STOPF | I2C_ISR_NACKF)) {
+            pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+        }
+    }
+    pI2C->CR2 |= I2C_CR2_START;
+
+    return 0;
+}
+
+int8_t i2c_write_continue(I2C_TypeDef *pI2C, const uint8_t *pdata, uint16_t length) {
+    uint16_t i;
+    uint8_t byte;
+
+    for (i = 0; i < length; i++) {
+        /* Wait for TXDR empty */
+        while (!(pI2C->ISR & I2C_ISR_TXE)) {
+            if (pI2C->ISR & I2C_ISR_NACKF) {
+                pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+                return -1;
+            }
+        }
+
+        byte = (pdata != NULL) ? pdata[i] : 0x00;
+        pI2C->TXDR = byte;
+        i2c_tx_remaining--;
+
+        i2c_tx_chunk_size--;
+        if (i2c_tx_chunk_size == 0 && i2c_tx_remaining > 0) {
+            /* Chunk reached 0, wait for TCR before programming next chunk */
+            while (!(pI2C->ISR & I2C_ISR_TCR)) {
+                if (pI2C->ISR & I2C_ISR_NACKF) {
+                    pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+                    return -1;
+                }
+            }
+            pI2C->CR2 &= ~(I2C_CR2_NBYTES_Msk);
+            if (i2c_tx_remaining > 0xFF) {
+                i2c_tx_chunk_size = 0xFF;
+                pI2C->CR2 |= (i2c_tx_chunk_size << I2C_CR2_NBYTES_Pos) | I2C_CR2_RELOAD;
+            } else {
+                i2c_tx_chunk_size = (uint8_t)i2c_tx_remaining;
+                pI2C->CR2 |= (i2c_tx_chunk_size << I2C_CR2_NBYTES_Pos);
+                pI2C->CR2 &= ~I2C_CR2_RELOAD;
+            }
+        }
+    }
+
+    return 0;
+}
+
+int8_t i2c_write_stop(I2C_TypeDef *pI2C, const uint8_t *pdata, uint16_t length) {
+    int8_t ret = 0;
+    if (length > 0) {
+        ret = i2c_write_continue(pI2C, pdata, length);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    /* Wait for autoend STOP flag */
+    while ((pI2C->ISR & I2C_ISR_STOPF) == 0) {
+        if (pI2C->ISR & I2C_ISR_NACKF) {
+            pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+            return -1;
+        }
+    }
+    pI2C->ICR = I2C_ICR_STOPCF;
+
+    return 0;
+}
+
+int8_t i2c_read_start(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint16_t total_length) {
+    (void)speed;
+
+    i2c_rx_remaining = total_length;
+    if (i2c_rx_remaining > 0xFF) {
+        i2c_rx_chunk_size = 0xFF;
+    } else {
+        i2c_rx_chunk_size = (uint8_t)i2c_rx_remaining;
+    }
+
+    /* - Xfer Configuration */
+    pI2C->CR2 = (0x00 << I2C_CR2_ADD10_Pos) |
+                (0x01 << I2C_CR2_RD_WRN_Pos) |
+                (i2c_rx_chunk_size << I2C_CR2_NBYTES_Pos) |
+                (0x01 << I2C_CR2_AUTOEND_Pos) |
+                (slave_address << (I2C_CR2_SADD_Pos + 1));
+    if (i2c_rx_remaining > 0xFF) {
+        pI2C->CR2 |= I2C_CR2_RELOAD;
+    }
+
+    /* - Start Xfer */
+    if (pI2C->ISR & I2C_ISR_BUSY) {
+        return -1;
+    }
+    pI2C->CR2 |= I2C_CR2_START;
+
+    while (!(pI2C->ISR & I2C_ISR_RXNE)) {
+        if (pI2C->ISR & I2C_ISR_NACKF) {
+            pI2C->ICR |= I2C_ICR_NACKCF;
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int8_t i2c_read_continue(I2C_TypeDef *pI2C, uint8_t *pdata, uint16_t length) {
+    uint16_t i;
+    uint8_t dummy;
+
+    for (i = 0; i < length; i++) {
+        while (!(pI2C->ISR & I2C_ISR_RXNE)) {
+            if (pI2C->ISR & I2C_ISR_NACKF) {
+                pI2C->ICR |= I2C_ICR_NACKCF;
+                return -1;
+            }
+        }
+
+        if (pdata != NULL) {
+            pdata[i] = (uint8_t)pI2C->RXDR;
+        } else {
+            dummy = (uint8_t)pI2C->RXDR;
+            (void)dummy;
+        }
+        i2c_rx_remaining--;
+
+        i2c_rx_chunk_size--;
+        if (i2c_rx_chunk_size == 0 && i2c_rx_remaining > 0) {
+            /* Chunk reached 0, wait for TCR before programming next chunk */
+            while (!(pI2C->ISR & I2C_ISR_TCR)) {
+                if (pI2C->ISR & I2C_ISR_NACKF) {
+                    pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+                    return -1;
+                }
+            }
+            pI2C->CR2 &= ~(I2C_CR2_NBYTES_Msk);
+            if (i2c_rx_remaining > 0xFF) {
+                i2c_rx_chunk_size = 0xFF;
+                pI2C->CR2 |= (i2c_rx_chunk_size << I2C_CR2_NBYTES_Pos) | I2C_CR2_RELOAD;
+            } else {
+                i2c_rx_chunk_size = (uint8_t)i2c_rx_remaining;
+                pI2C->CR2 |= (i2c_rx_chunk_size << I2C_CR2_NBYTES_Pos);
+                pI2C->CR2 &= ~I2C_CR2_RELOAD;
+            }
+        }
+    }
+
+    return 0;
+}
+
+int8_t i2c_read_stop(I2C_TypeDef *pI2C, uint8_t *pdata, uint16_t length) {
+    int8_t ret = 0;
+    if (length > 0) {
+        ret = i2c_read_continue(pI2C, pdata, length);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    /* Wait for autoend STOP flag */
+    while ((pI2C->ISR & I2C_ISR_STOPF) == 0) {
+        if (pI2C->ISR & I2C_ISR_NACKF) {
+            pI2C->ICR |= I2C_ICR_NACKCF;
+            return -1;
+        }
+    }
+    pI2C->ICR = I2C_ICR_STOPCF;
+
+    return 0;
 }
