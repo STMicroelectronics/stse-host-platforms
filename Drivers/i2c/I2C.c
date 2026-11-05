@@ -155,8 +155,10 @@ int8_t i2c_read(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8_
     }
 
     /* - Start Xfer */
-    if (pI2C->ISR & I2C_ISR_BUSY) {
-        return -1;
+    while (pI2C->ISR & I2C_ISR_BUSY) {
+        if (pI2C->ISR & (I2C_ISR_STOPF | I2C_ISR_NACKF)) {
+            pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+        }
     }
     pI2C->CR2 |= I2C_CR2_START;
 
@@ -341,16 +343,17 @@ int8_t i2c_read_start(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, 
     }
 
     /* - Start Xfer */
-    if (pI2C->ISR & I2C_ISR_BUSY) {
-        return -1;
+    while (pI2C->ISR & I2C_ISR_BUSY) {
+        if (pI2C->ISR & (I2C_ISR_STOPF | I2C_ISR_NACKF)) {
+            pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+        }
     }
     pI2C->CR2 |= I2C_CR2_START;
 
-    while (!(pI2C->ISR & I2C_ISR_RXNE)) {
-        if (pI2C->ISR & I2C_ISR_NACKF) {
-            pI2C->ICR |= I2C_ICR_NACKCF;
-            return -1;
-        }
+    /* Wait for START to be accepted: check for NACK */
+    if (pI2C->ISR & I2C_ISR_NACKF) {
+        pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+        return -1;
     }
 
     return 0;
