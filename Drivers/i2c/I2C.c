@@ -126,6 +126,7 @@ int8_t i2c_write(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8
 
     while ((pI2C->ISR & I2C_ISR_STOPF) == 0)
         ;
+    pI2C->ICR = I2C_ICR_STOPCF;
 
     return 0;
 }
@@ -199,6 +200,7 @@ int8_t i2c_read(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, uint8_
 
     while ((pI2C->ISR & I2C_ISR_STOPF) == 0)
         ;
+    pI2C->ICR = I2C_ICR_STOPCF;
 
     return 0;
 }
@@ -350,10 +352,12 @@ int8_t i2c_read_start(I2C_TypeDef *pI2C, uint8_t slave_address, uint16_t speed, 
     }
     pI2C->CR2 |= I2C_CR2_START;
 
-    /* Wait for START to be accepted: check for NACK */
-    if (pI2C->ISR & I2C_ISR_NACKF) {
-        pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
-        return -1;
+    /* Wait until slave acknowledges address (RXNE) or NACKs */
+    while (!(pI2C->ISR & I2C_ISR_RXNE)) {
+        if (pI2C->ISR & I2C_ISR_NACKF) {
+            pI2C->ICR = I2C_ICR_NACKCF | I2C_ICR_STOPCF;
+            return -1;
+        }
     }
 
     return 0;
