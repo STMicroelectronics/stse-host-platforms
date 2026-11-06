@@ -26,12 +26,12 @@
 
 #ifdef STSE_ENABLE_CHUNKS_TRANSFER
 //static PLAT_UI8 I2c_buffer[STSE_CHUNK_SIZE];
-static PLAT_UI8 I2c_buffer[755U]; // Set to A120 max input buffer size + 2 bytes needed for response length + 1 byte for command or response header. Shall be adapted to applicative use case!
+static PLAT_UI8 I2c_buffer[1012U + 3U]; // Set to used STSAFE-A max input buffer size (STSAFEA_MAX_FRAME_LENGTH_Axxx) + 2 bytes needed for response length + 1 byte for command or response header. Shall be adapted to applicative use case!
 #else
 #ifdef STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION
 static PLAT_UI8 *pI2c_buffer;
 #else
-static PLAT_UI8 I2c_buffer[755U]; // Set to A120 max input buffer size + 2 bytes needed for response length + 1 byte for command or response header. Shall be adapted to applicative use case!
+static PLAT_UI8 I2c_buffer[1012U + 3U]; // Set to used STSAFE-A max input buffer size (STSAFEA_MAX_FRAME_LENGTH_Axxx) + 2 bytes needed for response length + 1 byte for command or response header. Shall be adapted to applicative use case!
 #endif /* STSE_PLATFORM_I2C_DYNAMIC_BUFFER_ALLOCATION */
 #endif /* STSE_ENABLE_CHUNK_TRANSFER */
 
